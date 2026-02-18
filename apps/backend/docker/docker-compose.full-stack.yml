@@ -1,0 +1,86 @@
+# Stack completo: Backend (CompletePay Agent) + Frontend (Next.js) + Postgres + Redis
+# Uso (a partir de apps/backend): docker compose -f docker/docker-compose.full-stack.yml up -d
+# Uso (a partir da raiz SaaS): docker compose -f apps/backend/docker/docker-compose.full-stack.yml up -d
+#
+# Frontend: http://localhost:3000
+# Backend API: http://localhost:8000  (docs: http://localhost:8000/docs)
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: completepay-postgres
+    environment:
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: completepay_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d completepay_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: completepay-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: completepay-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    environment:
+      - APP_ENV=production
+      - DATABASE_URL=postgresql://agent:password@postgres:5432/completepay_agent
+      - REDIS_URL=redis://redis:6379
+      - CORS_ORIGINS=http://localhost:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+      args:
+        # URL que o navegador usa para chamar a API (backend na mesma máquina)
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    container_name: completepay-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      - NODE_ENV=production
+
+volumes:
+  postgres_data:
+  redis_data:

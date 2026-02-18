@@ -1,0 +1,38 @@
+# Monorepo root
+node_modules/
+docs/
+
+# Backend (Python)
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.db
+*.sqlite
+
+# Frontend (Next.js)
+.next/
+/out/
+*.tsbuildinfo
+
+# Environment
+.env
+.env*.local
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.log
+tmp/

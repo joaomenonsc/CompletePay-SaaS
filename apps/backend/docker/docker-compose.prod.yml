@@ -1,0 +1,81 @@
+# docker-compose.prod.yml - Producao (Fase 8)
+# Uso: docker compose -f docker/docker-compose.prod.yml up -d
+# Requer .env com DATABASE_URL, REDIS_URL, GOOGLE_API_KEY (e demais API keys LLM).
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: completepay-agent
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    environment:
+      - APP_ENV=production
+      - LOG_LEVEL=INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: completepay-postgres-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: completepay_agent
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+      - ./init-pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d completepay_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  redis:
+    image: redis:7-alpine
+    container_name: completepay-redis-prod
+    restart: unless-stopped
+    volumes:
+      - redis_data_prod:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+volumes:
+  postgres_data_prod:
+  redis_data_prod:

@@ -1,0 +1,110 @@
+# docker-compose.portainer.yml - Portainer + Traefik (Docker Swarm)
+#
+# Uso: Stacks > Add stack > Compose path: docker/docker-compose.portainer.yml
+# Deploy como SWARM para o Traefik descobrir o servico.
+#
+# Imagem: use a do Docker Hub (build para linux/amd64 antes do deploy):
+#   docker buildx build --platform linux/amd64 -t menonsc/completepay-agent:latest --push -f docker/Dockerfile .
+#
+# Obrigatorio na Stack: GOOGLE_API_KEY. Opcional: DATABASE_URL, REDIS_URL (defaults usam host postgres/redis).
+# Rede: network_public (mesma do Traefik). Certificado: letsencryptresolver.
+# Apos o deploy: https://agente.elevroi.com.br/docs
+
+services:
+  app:
+    image: menonsc/completepay-agent:latest
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Hosts postgres/redis = nomes dos servicos na stack (nao use localhost no Swarm)
+      - DATABASE_URL=postgresql://agent:password@postgres:5432/completepay_agent
+      - REDIS_URL=redis://redis:6379
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - API_RATE_LIMIT=${API_RATE_LIMIT:-100}
+      - HIGH_VALUE_THRESHOLD=${HIGH_VALUE_THRESHOLD:-10000}
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - default
+      - network_public
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.completepay-agent.rule=Host(`agente.elevroi.com.br`)"
+        - "traefik.http.routers.completepay-agent.entrypoints=websecure"
+        - "traefik.http.routers.completepay-agent.tls=true"
+        - "traefik.http.routers.completepay-agent.tls.certresolver=letsencryptresolver"
+        - "traefik.http.services.completepay-agent.loadbalancer.server.port=8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-completepay_agent}
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+    configs:
+      - source: pgvector_init
+        target: /docker-entrypoint-initdb.d/01-pgvector.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d completepay_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data_prod:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+# Config so executa na primeira criacao do volume; se o volume ja existir, rode no Postgres:
+#   psql -U agent -d completepay_agent -c "CREATE EXTENSION IF NOT EXISTS vector;"
+configs:
+  pgvector_init:
+    file: init-pgvector.sql
+    name: agent_agno_pgvector_init
+
+networks:
+  network_public:
+    external: true
+
+volumes:
+  postgres_data_prod:
+  redis_data_prod:

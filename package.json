@@ -1,0 +1,26 @@
+{
+  "name": "completepay-saas",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Monorepo CompletePay SaaS - Backend (Python/FastAPI) e Frontend (Next.js)",
+  "workspaces": [
+    "apps/backend",
+    "apps/frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "npm run dev -w @saas/backend",
+    "dev:frontend": "npm run dev -w @saas/frontend",
+    "build": "npm run build -w @saas/frontend",
+    "build:frontend": "npm run build -w @saas/frontend",
+    "start:frontend": "npm run start -w @saas/frontend",
+    "lint": "npm run lint -w @saas/frontend",
+    "install:all": "npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

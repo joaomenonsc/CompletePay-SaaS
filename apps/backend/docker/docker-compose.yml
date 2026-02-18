@@ -1,0 +1,39 @@
+# docker-compose.yml - Desenvolvimento (PostgreSQL + PgVector, Redis)
+# Uso: docker compose -f docker/docker-compose.yml up -d
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: completepay-postgres
+    environment:
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: completepay_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d completepay_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: completepay-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,3 @@
+# Dependencia para extrair texto de PDFs no agente estruturado (runs-com-busca).
+# Sem ela, o conteudo do PDF nao e injetado como texto no contexto.
+pypdf>=4.0.0
