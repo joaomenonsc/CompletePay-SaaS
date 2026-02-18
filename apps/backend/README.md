@@ -97,6 +97,28 @@ docker compose -f docker/docker-compose.prod.yml up -d
 
 A aplicacao sobe na porta 8000, com politicas de restart e limites de recursos. Configure `.env` com `APP_ENV=production` e variaveis de producao (incl. `DATABASE_URL`, `REDIS_URL`, `GOOGLE_API_KEY`).
 
+## Deploy na Vercel
+
+É possível publicar a API FastAPI na Vercel como **serverless** (uma função por requisição).
+
+### Passos
+
+1. No [dashboard da Vercel](https://vercel.com), crie um **novo projeto** e importe o mesmo repositório do frontend.
+2. Em **Root Directory**, defina: `apps/backend`.
+3. A Vercel detecta FastAPI e usa o entrypoint `src/app.py` (que re-exporta a aplicação).
+4. **Variáveis de ambiente**: em Settings → Environment Variables, configure pelo menos:
+   - `DATABASE_URL` – PostgreSQL (ex.: Vercel Postgres, Neon, Supabase)
+   - `REDIS_URL` – Redis (ex.: Upstash)
+   - `JWT_SECRET` – segredo para tokens
+   - `CORS_ORIGINS` – domínio do frontend (ex.: `https://seu-app.vercel.app`)
+   - `GOOGLE_API_KEY` (e outras chaves de LLM que usar)
+5. As migrações e o seed do banco precisam ser rodados **fora** da Vercel (localmente ou em outro job), apontando para o mesmo `DATABASE_URL`.
+
+### Limitações
+
+- **WebSockets**: a Vercel executa uma função por requisição HTTP. O endpoint de **chat por WebSocket** (`/ws/chat`) pode não funcionar como conexão longa; para chat em tempo real em produção, avalie um serviço dedicado (ex.: Ably, Pusher) ou hospedar o backend em Railway/Render/Fly.io onde o processo fica ativo.
+- **Tamanho do bundle**: o deploy tem limite de 250 MB; o `vercel.json` do backend exclui `tests/`, `scripts/` e `.venv` para reduzir o tamanho.
+
 ## Estrutura principal
 
 - `src/agents/` – Agente base e especialistas (Payment, Support, Fraud)
