@@ -128,12 +128,12 @@ export default function AgentPlaygroundPage() {
                   <div className="min-w-0 flex-1 space-y-1">
                     <p className="font-medium text-sm">{msg.role === "assistant" ? "Bot" : "User"}</p>
                     <p className="text-sm leading-relaxed">{msg.content}</p>
-                    {"kbSources" in msg && msg.kbSources && msg.kbSources.length > 0 && (
+                    {"kbSources" in msg && msg.kbSources && msg.kbSources.length > 0 ? (
                       <div className="mt-2 border-t pt-2 text-muted-foreground text-xs">
                         <span className="font-medium">[KB]</span>{" "}
                         {msg.kbSources.map((s: { file: string; chunk: number }) => `${s.file} chunk #${s.chunk}`).join(", ")}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               </div>
