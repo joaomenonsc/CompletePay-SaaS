@@ -119,6 +119,19 @@ A aplicacao sobe na porta 8000, com politicas de restart e limites de recursos. 
 - **WebSockets**: a Vercel executa uma função por requisição HTTP. O endpoint de **chat por WebSocket** (`/ws/chat`) pode não funcionar como conexão longa; para chat em tempo real em produção, avalie um serviço dedicado (ex.: Ably, Pusher) ou hospedar o backend em Railway/Render/Fly.io onde o processo fica ativo.
 - **Tamanho do bundle**: o deploy tem limite de 250 MB; evite incluir arquivos desnecessários (a Vercel ignora automaticamente pastas como `__pycache__` e `.venv` quando aplicável).
 
+### Se aparecer "This Serverless Function has crashed" (500)
+
+1. **Abra a URL do backend no navegador** (ex.: `https://complete-pay-saa-s-backend-nk3c.vercel.app`).  
+   O entrypoint foi ajustado para, em caso de erro na importação, devolver um JSON com `message` e `traceback` — assim você vê a causa do crash.
+
+2. **Confirme no projeto da Vercel (backend)**:
+   - **Root Directory** está definido como **`apps/backend`** (Settings → General).
+   - **Environment Variables** estão preenchidas para Production (e Preview se quiser): `DATABASE_URL`, `CORS_ORIGINS`, `JWT_SECRET`; opcionalmente `REDIS_URL`, `GOOGLE_API_KEY`, etc.
+
+3. **Veja os logs**: Deployments → último deploy → **Functions** → clique na função → **Logs**. O traceback completo também aparece aí.
+
+4. **Re-deploy** depois de alterar Root Directory ou variáveis de ambiente.
+
 ## Estrutura principal
 
 - `src/agents/` – Agente base e especialistas (Payment, Support, Fraud)
