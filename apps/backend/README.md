@@ -117,7 +117,7 @@ A aplicacao sobe na porta 8000, com politicas de restart e limites de recursos. 
 ### Limitações
 
 - **WebSockets**: a Vercel executa uma função por requisição HTTP. O endpoint de **chat por WebSocket** (`/ws/chat`) pode não funcionar como conexão longa; para chat em tempo real em produção, avalie um serviço dedicado (ex.: Ably, Pusher) ou hospedar o backend em Railway/Render/Fly.io onde o processo fica ativo.
-- **Tamanho do bundle**: o deploy tem limite de 250 MB; o `vercel.json` do backend exclui `tests/`, `scripts/` e `.venv` para reduzir o tamanho.
+- **Tamanho do bundle**: o deploy tem limite de 250 MB; evite incluir arquivos desnecessários (a Vercel ignora automaticamente pastas como `__pycache__` e `.venv` quando aplicável).
 
 ## Estrutura principal
 
