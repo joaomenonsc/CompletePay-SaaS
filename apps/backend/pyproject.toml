@@ -41,6 +41,8 @@ dev = [
 
 [project.scripts]
 completepay-agent = "src.cli.main:app"
+# Entrypoint para a Vercel (FastAPI): procura por script "app"
+app = "src.app:app"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
