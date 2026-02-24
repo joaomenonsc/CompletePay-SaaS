@@ -1,6 +1,4 @@
 """Rotas REST para organizacoes (Fase 4.1). Listar minhas orgs, criar org, atualizar org."""
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
@@ -29,6 +27,7 @@ from src.schemas.organization import (
     OrgMemberItem,
     UpdateMemberRoleBody,
 )
+from src.services.avatar_storage import save_avatar
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
 
@@ -103,13 +102,6 @@ EXT_BY_CONTENT_TYPE = {
 }
 
 
-def _get_avatars_dir() -> Path:
-    base = Path(__file__).resolve().parent.parent.parent.parent
-    avatars_dir = base / "uploads" / "avatars"
-    avatars_dir.mkdir(parents=True, exist_ok=True)
-    return avatars_dir
-
-
 @router.post("/{organization_id}/avatar", response_model=OrganizationResponse)
 def upload_org_avatar(
     organization_id: str,
@@ -140,11 +132,11 @@ def upload_org_avatar(
         )
     ext = EXT_BY_CONTENT_TYPE.get(file.content_type, "jpg")
     safe_id = organization_id.replace("-", "")[:32]
-    filename = f"org-{safe_id}.{ext}"
-    avatars_dir = _get_avatars_dir()
-    path = avatars_dir / filename
-    path.write_bytes(contents)
-    avatar_url = f"/uploads/avatars/{filename}"
+    pathname = f"avatars/org-{safe_id}.{ext}"
+    try:
+        avatar_url = save_avatar(pathname, contents, file.content_type or "image/jpeg")
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     updated = update_organization(db, organization_id, avatar_url=avatar_url)
     return OrganizationResponse.from_orm_row(updated)
 

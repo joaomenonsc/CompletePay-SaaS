@@ -1,6 +1,5 @@
 """Rotas de autenticacao: registro e login (bcrypt + JWT)."""
 import re
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
@@ -26,6 +25,7 @@ from src.auth.repository import (
 from src.auth.service import create_access_token, hash_password, verify_password
 from src.config.settings import get_settings
 from src.db.session import get_db
+from src.services.avatar_storage import save_avatar
 from src.organizations.service import create_organization
 from src.services.email_service import EmailService
 
@@ -291,14 +291,6 @@ EXT_BY_CONTENT_TYPE = {
 }
 
 
-def _get_avatars_dir() -> Path:
-    """Diretorio onde os avatares sao salvos (uploads/avatars)."""
-    base = Path(__file__).resolve().parent.parent.parent.parent
-    avatars_dir = base / "uploads" / "avatars"
-    avatars_dir.mkdir(parents=True, exist_ok=True)
-    return avatars_dir
-
-
 @router.post("/me/avatar")
 def upload_avatar(
     file: UploadFile = File(...),
@@ -320,13 +312,12 @@ def upload_avatar(
             detail="Arquivo muito grande. Maximo 5MB.",
         )
     ext = EXT_BY_CONTENT_TYPE.get(file.content_type, "jpg")
-    # Nome estavel por usuario (sobrescreve ao enviar nova foto)
     safe_id = user_id.replace("-", "")[:32]
-    filename = f"{safe_id}.{ext}"
-    avatars_dir = _get_avatars_dir()
-    path = avatars_dir / filename
-    path.write_bytes(contents)
-    avatar_url = f"/uploads/avatars/{filename}"
+    pathname = f"avatars/{safe_id}.{ext}"
+    try:
+        avatar_url = save_avatar(pathname, contents, file.content_type or "image/jpeg")
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     update_user_avatar(user_id, avatar_url)
     user = get_user_by_id(user_id)
     role = getattr(user, "role", "user") if user else "user"

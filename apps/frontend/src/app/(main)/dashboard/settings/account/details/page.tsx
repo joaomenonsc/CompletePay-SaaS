@@ -168,7 +168,12 @@ export default function AccountDetailsPage() {
   };
 
   const avatarSrc =
-    avatarPreview ?? (me?.avatar_url ? `${API_BASE_URL}${me.avatar_url}` : undefined);
+    avatarPreview ??
+    (me?.avatar_url
+      ? me.avatar_url.startsWith("http")
+        ? me.avatar_url
+        : `${API_BASE_URL}${me.avatar_url}`
+      : undefined);
 
   return (
     <SettingsAccountLayout

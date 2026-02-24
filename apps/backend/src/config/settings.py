@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     frontend_url: str = Field(
         default="http://localhost:3003", validation_alias="FRONTEND_URL"
     )
+    # Vercel Blob (upload de avatares em producao; sem token usa filesystem local)
+    blob_read_write_token: str = Field(
+        default="", validation_alias="BLOB_READ_WRITE_TOKEN"
+    )
 
 
 def get_settings() -> Settings:

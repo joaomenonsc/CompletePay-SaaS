@@ -1,6 +1,7 @@
 # Monorepo root
 node_modules/
 docs/
+apps.zip
 
 # Backend (Python)
 .venv/
