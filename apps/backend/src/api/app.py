@@ -3,16 +3,20 @@ Aplicacao FastAPI - Fase 7.
 Rotas /chat e /health; middleware de logging, rate limit e JWT opcional.
 """
 import logging
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from src.api.middleware.auth import JwtOptionalMiddleware
 from src.api.middleware.logging_middleware import LoggingMiddleware
 from src.api.middleware.rate_limit import RateLimitMiddleware
 from src.api.middleware.security_headers import SecurityHeadersMiddleware
 from src.api.routes.agents import router as agents_router
+from src.api.routes.calendar import router as calendar_router
+from src.api.routes.calendar_public import router as calendar_public_router
 from src.api.routes.auth import router as auth_router
 from src.api.routes.chat import router as chat_router
 from src.api.routes.health import router as health_router
@@ -63,8 +67,15 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(organizations_router)
 app.include_router(agents_router)
+app.include_router(calendar_router)
+app.include_router(calendar_public_router)
 app.include_router(chat_router)
 app.include_router(ws_chat_router)
+
+# Servir arquivos de upload (ex.: avatares em /uploads/avatars/...)
+_uploads_dir = Path(__file__).resolve().parent.parent.parent / "uploads"
+_uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
 
 
 @app.get("/")

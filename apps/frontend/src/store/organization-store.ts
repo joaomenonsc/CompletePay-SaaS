@@ -9,6 +9,7 @@ export interface Organization {
   id: string;
   name: string;
   slug: string;
+  avatarUrl: string | null;
   role: string;
   createdAt: string;
 }

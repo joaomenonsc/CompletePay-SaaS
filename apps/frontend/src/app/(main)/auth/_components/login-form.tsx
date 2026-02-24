@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { useRouter } from "next/navigation";
 
@@ -13,12 +13,12 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { login } from "@/lib/api/auth";
+import { login, resendConfirmation } from "@/lib/api/auth";
 import { useAuthStore } from "@/store/auth-store";
 
 const FormSchema = z.object({
-  email: z.string().email({ message: "Please enter a valid email address." }),
-  password: z.string().min(8, { message: "Password must be at least 8 characters." }),
+  email: z.string().email({ message: "Digite um e-mail válido." }),
+  password: z.string().min(8, { message: "A senha deve ter pelo menos 8 caracteres." }),
   remember: z.boolean().optional(),
 });
 
@@ -26,6 +26,8 @@ export function LoginForm() {
   const router = useRouter();
   const token = useAuthStore((s) => s.token);
   const setToken = useAuthStore((s) => s.setToken);
+  const [needsConfirmation, setNeedsConfirmation] = useState(false);
+  const [resending, setResending] = useState(false);
 
   useEffect(() => {
     if (token) router.replace("/dashboard");
@@ -41,6 +43,7 @@ export function LoginForm() {
   });
 
   const onSubmit = async (data: z.infer<typeof FormSchema>) => {
+    setNeedsConfirmation(false);
     try {
       const res = await login({ email: data.email, password: data.password });
       setToken(res.access_token);
@@ -48,13 +51,38 @@ export function LoginForm() {
       router.push("/dashboard");
       router.refresh();
     } catch (err: unknown) {
+      const status = err && typeof err === "object" && "response" in err
+        ? (err as { response?: { status?: number } }).response?.status
+        : undefined;
       const message =
         err && typeof err === "object" && "response" in err
           ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
           : err instanceof Error
             ? err.message
             : "Falha ao fazer login.";
+      if (status === 403 && typeof message === "string" && message.toLowerCase().includes("confirme seu email")) {
+        setNeedsConfirmation(true);
+      }
       toast.error(message ?? "Falha ao fazer login.");
+    }
+  };
+
+  const onResendConfirmation = async () => {
+    const email = form.getValues("email");
+    if (!email) return;
+    setResending(true);
+    try {
+      const res = await resendConfirmation(email);
+      toast.success(res.message);
+      setNeedsConfirmation(false);
+    } catch (err: unknown) {
+      const message =
+        err && typeof err === "object" && "response" in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : "Falha ao reenviar.";
+      toast.error(message ?? "Falha ao reenviar.");
+    } finally {
+      setResending(false);
     }
   };
 
@@ -66,9 +94,9 @@ export function LoginForm() {
           name="email"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Email Address</FormLabel>
+              <FormLabel>E-mail</FormLabel>
               <FormControl>
-                <Input id="email" type="email" placeholder="you@example.com" autoComplete="email" {...field} />
+                <Input id="email" type="email" placeholder="voce@exemplo.com" autoComplete="email" {...field} />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -79,7 +107,7 @@ export function LoginForm() {
           name="password"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Password</FormLabel>
+              <FormLabel>Senha</FormLabel>
               <FormControl>
                 <Input
                   id="password"
@@ -107,14 +135,25 @@ export function LoginForm() {
                 />
               </FormControl>
               <FormLabel htmlFor="login-remember" className="ml-1 font-medium text-muted-foreground text-sm">
-                Remember me for 30 days
+                Lembrar de mim por 30 dias
               </FormLabel>
             </FormItem>
           )}
         />
         <Button className="w-full" type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? "Entrando…" : "Login"}
+          {form.formState.isSubmitting ? "Entrando…" : "Entrar"}
         </Button>
+        {needsConfirmation && (
+          <Button
+            type="button"
+            variant="link"
+            className="text-muted-foreground text-sm"
+            onClick={onResendConfirmation}
+            disabled={resending}
+          >
+            {resending ? "Reenviando…" : "Reenviar email de confirmação"}
+          </Button>
+        )}
       </form>
     </Form>
   );

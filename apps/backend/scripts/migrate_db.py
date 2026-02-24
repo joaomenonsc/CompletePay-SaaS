@@ -37,15 +37,59 @@ def run_migrate() -> int:
                 cur.execute("""
                     ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(32) NOT NULL DEFAULT 'user';
                 """)
+                cur.execute("""
+                    ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255);
+                """)
+                cur.execute("""
+                    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(512);
+                """)
+                cur.execute("""
+                    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_confirmed_at TIMESTAMPTZ;
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS email_confirm_tokens (
+                        token VARCHAR(64) PRIMARY KEY,
+                        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        expires_at TIMESTAMPTZ NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    );
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_email_confirm_tokens_user_id ON email_confirm_tokens(user_id);")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_email_confirm_tokens_expires_at ON email_confirm_tokens(expires_at);")
+                # Contas existentes passam a ser consideradas confirmadas
+                cur.execute("""
+                    UPDATE users SET email_confirmed_at = created_at WHERE email_confirmed_at IS NULL;
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS user_sessions (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        jti VARCHAR(64) NOT NULL UNIQUE,
+                        device_info VARCHAR(512),
+                        ip_address VARCHAR(64),
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    );
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);")
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS revoked_tokens (
+                        jti VARCHAR(64) PRIMARY KEY,
+                        revoked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    );
+                """)
                 conn.commit()
-            print("Migracao: extensao pgvector e tabela users (com role) garantidas.")
+            print("Migracao: extensao pgvector, users e user_sessions/revoked_tokens garantidas.")
 
-        # Tabelas via SQLAlchemy (organizations, user_organizations, agent_configs). Fase 4.1.
+        # Tabelas via SQLAlchemy (organizations, user_organizations, agent_configs, calendario).
         from src.db.session import Base, engine
         from src.db import models  # noqa: F401 - registra Organization, UserOrganization, AgentConfig
+        from src.db import models_calendar  # noqa: F401 - registra tabelas do modulo Calendario
         Base.metadata.create_all(bind=engine)
         with psycopg.connect(url, connect_timeout=10) as conn2:
             with conn2.cursor() as cur2:
+                cur2.execute(
+                    "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS avatar_url VARCHAR(512);"
+                )
                 cur2.execute(
                     "ALTER TABLE agent_configs ADD COLUMN IF NOT EXISTS organization_id VARCHAR(36);"
                 )
@@ -63,7 +107,7 @@ def run_migrate() -> int:
                     END $$;
                 """)
                 conn2.commit()
-        print("Tabelas organizations, user_organizations e agent_configs garantidas.")
+        print("Tabelas organizations, user_organizations, agent_configs e calendario garantidas.")
 
         # Backfill: agentes sem organization_id recebem a primeira org do dono (owner preferido).
         with psycopg.connect(url, connect_timeout=10) as conn3:

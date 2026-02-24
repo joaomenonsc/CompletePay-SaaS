@@ -39,12 +39,17 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const isDashboard = pathname.startsWith("/dashboard");
-  const isAuthPage = pathname.startsWith("/auth/v1") || pathname.startsWith("/auth/v2") || pathname === "/auth";
+  const isAuthPage =
+    pathname.startsWith("/auth/v1") ||
+    pathname.startsWith("/auth/v2") ||
+    pathname === "/auth";
+  const isCalendarioPublic = pathname.startsWith("/calendario");
   const isPublic =
     pathname === "/" ||
     pathname.startsWith("/unauthorized") ||
     pathname.startsWith("/_next") ||
-    pathname.startsWith("/api");
+    pathname.startsWith("/api") ||
+    isCalendarioPublic;
 
   if (isPublic || isAuthPage) {
     return NextResponse.next();
@@ -63,5 +68,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  matcher: ["/dashboard/:path*", "/calendario/:path*"],
 };

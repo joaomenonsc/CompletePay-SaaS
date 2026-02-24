@@ -90,10 +90,16 @@ export const sidebarItems: NavGroup[] = [
         comingSoon: true,
       },
       {
-        title: "Calendar",
-        url: "/dashboard/coming-soon",
+        title: "Calendário",
+        url: "/dashboard/calendario",
         icon: Calendar,
-        comingSoon: true,
+        subItems: [
+          { title: "Tipos de evento", url: "/dashboard/calendario/tipos-de-evento", icon: Calendar },
+          { title: "Reservas", url: "/dashboard/calendario/reservas", icon: Calendar },
+          { title: "Disponibilidade", url: "/dashboard/calendario/disponibilidade", icon: Calendar },
+          { title: "Workflows", url: "/dashboard/calendario/workflows", icon: Calendar },
+          { title: "Insights", url: "/dashboard/calendario/insights", icon: Calendar },
+        ],
       },
       {
         title: "Kanban",

@@ -14,6 +14,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/api/auth", () => ({
   login: vi.fn(),
+  resendConfirmation: vi.fn(),
 }));
 
 const mockSetToken = vi.hoisted(() => vi.fn());
@@ -32,19 +33,19 @@ vi.mock("sonner", () => ({
 const loginMock = vi.mocked(await import("@/lib/api/auth").then((m) => m.login));
 
 describe("LoginForm", () => {
-  it("renderiza campos de email e senha e botao Login", () => {
+  it("renderiza campos de email e senha e botao Entrar", () => {
     render(<LoginForm />);
-    expect(screen.getByPlaceholderText(/you@example\.com/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/voce@exemplo\.com/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/••••••••/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /login/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /entrar/i })).toBeInTheDocument();
   });
 
   it("nao chama login quando email e invalido (validacao bloqueia submit)", async () => {
     const user = userEvent.setup();
     render(<LoginForm />);
-    await user.type(screen.getByPlaceholderText(/you@example\.com/i), "invalido");
+    await user.type(screen.getByPlaceholderText(/voce@exemplo\.com/i), "invalido");
     await user.type(screen.getByPlaceholderText(/••••••••/), "12345678");
-    await user.click(screen.getByRole("button", { name: /login/i }));
+    await user.click(screen.getByRole("button", { name: /entrar/i }));
     await waitFor(() => {
       expect(loginMock).not.toHaveBeenCalled();
     });
@@ -53,11 +54,11 @@ describe("LoginForm", () => {
   it("exibe erro de validacao para senha curta ao submeter", async () => {
     const user = userEvent.setup();
     render(<LoginForm />);
-    await user.type(screen.getByPlaceholderText(/you@example\.com/i), "a@b.com");
+    await user.type(screen.getByPlaceholderText(/voce@exemplo\.com/i), "a@b.com");
     await user.type(screen.getByPlaceholderText(/••••••••/), "123");
-    await user.click(screen.getByRole("button", { name: /login/i }));
+    await user.click(screen.getByRole("button", { name: /entrar/i }));
     await waitFor(() => {
-      expect(screen.getByText(/at least 8/i)).toBeInTheDocument();
+      expect(screen.getByText(/pelo menos 8/i)).toBeInTheDocument();
     });
   });
 
@@ -68,9 +69,9 @@ describe("LoginForm", () => {
     });
     const user = userEvent.setup();
     render(<LoginForm />);
-    await user.type(screen.getByPlaceholderText(/you@example\.com/i), "user@example.com");
+    await user.type(screen.getByPlaceholderText(/voce@exemplo\.com/i), "user@example.com");
     await user.type(screen.getByPlaceholderText(/••••••••/), "password123");
-    await user.click(screen.getByRole("button", { name: /login/i }));
+    await user.click(screen.getByRole("button", { name: /entrar/i }));
     await waitFor(() => {
       expect(loginMock).toHaveBeenCalledWith({
         email: "user@example.com",

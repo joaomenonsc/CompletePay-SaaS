@@ -1,5 +1,6 @@
 """Servico de autenticacao: hash de senha (bcrypt) e emissao de JWT."""
 import time
+import uuid
 from typing import Any
 
 import bcrypt
@@ -40,23 +41,26 @@ def create_access_token(
     sub: str,
     expires_in_seconds: int = 86400,
     role: str = "user",
-) -> str:  # 24h
+) -> tuple[str, str]:  # (token, jti) - 24h
     """
-    Gera um JWT com claim 'sub' (user_id) e 'role' (RBAC).
-    exp padrao: 24 horas.
+    Gera um JWT com claim 'sub' (user_id), 'role' (RBAC) e 'jti' (id da sessao).
+    Retorna (token, jti) para registrar a sessao em user_sessions.
     """
     if not _JWT_AVAILABLE:
         raise RuntimeError("pyjwt nao instalado")
     secret = get_settings().jwt_secret
     now = int(time.time())
+    jti = str(uuid.uuid4())
     payload: dict[str, Any] = {
         "sub": str(sub),
         "role": (role or "user"),
+        "jti": jti,
         "iat": now,
         "exp": now + expires_in_seconds,
     }
     token = pyjwt.encode(payload, secret, algorithm="HS256")
-    return token if isinstance(token, str) else token.decode("utf-8")
+    token_str = token if isinstance(token, str) else token.decode("utf-8")
+    return (token_str, jti)
 
 
 def decode_access_token(token: str) -> dict[str, Any]:

@@ -9,7 +9,8 @@ from src.auth.service import create_access_token
 @pytest.fixture
 def valid_token() -> str:
     """Gera um JWT valido para testes."""
-    return create_access_token(user_id="test-user", role="user")
+    token, _ = create_access_token(sub="test-user", role="user")
+    return token
 
 
 @pytest.fixture

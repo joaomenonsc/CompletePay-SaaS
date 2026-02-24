@@ -25,10 +25,15 @@ PUBLIC_ROUTES = [
     ("GET", "/health"),
     ("POST", "/auth/register"),
     ("POST", "/auth/login"),
+    ("POST", "/auth/confirm-email"),
+    ("POST", "/auth/resend-confirmation"),
     ("GET", "/"),
     ("GET", "/docs"),
     ("GET", "/redoc"),
     ("GET", "/openapi.json"),
+    ("GET", "/api/v1/public/calendar"),
+    ("POST", "/api/v1/public/calendar"),
+    ("GET", "/uploads"),  # avatares e outros arquivos estaticos publicos
 ]
 
 
@@ -123,6 +128,7 @@ class JwtRequiredMiddleware(BaseHTTPMiddleware):
                         if payload and "sub" in payload:
                             request.state.user_id = str(payload.get("sub"))
                             request.state.role = (payload.get("role") or "user")
+                            request.state.jti = payload.get("jti")
             return await call_next(request)
 
         # Rota protegida: exige JWT valido
@@ -148,6 +154,17 @@ class JwtRequiredMiddleware(BaseHTTPMiddleware):
                 status_code=401,
                 content={"detail": "Token invalido ou expirado."},
             )
+        jti = payload.get("jti")
+        if jti:
+            from src.auth.repository import is_jti_revoked
+            if is_jti_revoked(jti):
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Sessao encerrada. Faca login novamente."},
+                )
+            request.state.jti = jti
+        else:
+            request.state.jti = None
         request.state.user_id = str(payload.get("sub"))
         request.state.role = payload.get("role") or "user"
         return await call_next(request)

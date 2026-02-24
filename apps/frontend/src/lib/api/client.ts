@@ -18,7 +18,11 @@ client.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token;
   if (token) config.headers.Authorization = `Bearer ${token}`;
   const orgId = useOrganizationStore.getState().currentOrganizationId;
-  if (orgId) config.headers["X-Organization-Id"] = orgId;
+  if (orgId) config.headers["X-Organization-Id"] = orgId.toLowerCase();
+  // FormData precisa de multipart/form-data com boundary; nao usar application/json
+  if (config.data instanceof FormData) {
+    delete config.headers["Content-Type"];
+  }
   return config;
 });
 

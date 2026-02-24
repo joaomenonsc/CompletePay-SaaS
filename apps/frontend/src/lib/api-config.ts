@@ -18,9 +18,18 @@ export const API_ENDPOINTS = {
   auth: {
     login: () => `${API_BASE_URL}/auth/login`,
     register: () => `${API_BASE_URL}/auth/register`,
+    confirmEmail: () => `${API_BASE_URL}/auth/confirm-email`,
+    resendConfirmation: () => `${API_BASE_URL}/auth/resend-confirmation`,
     me: () => `${API_BASE_URL}/auth/me`,
+    meAvatar: () => `${API_BASE_URL}/auth/me/avatar`,
+    mePassword: () => `${API_BASE_URL}/auth/me/password`,
+    meSessions: () => `${API_BASE_URL}/auth/me/sessions`,
+    meSessionRevoke: (id: string) => `${API_BASE_URL}/auth/me/sessions/${id}`,
+    meSessionsRevokeAll: () => `${API_BASE_URL}/auth/me/sessions/revoke-all`,
   },
   agents: () => `${API_BASE_URL}/agents`,
   agent: (id: string) => `${API_BASE_URL}/agents/${id}`,
   organizations: () => `${API_BASE_URL}/organizations`,
+  organization: (id: string) => `${API_BASE_URL}/organizations/${id}`,
+  organizationAvatar: (id: string) => `${API_BASE_URL}/organizations/${id}/avatar`,
 } as const;

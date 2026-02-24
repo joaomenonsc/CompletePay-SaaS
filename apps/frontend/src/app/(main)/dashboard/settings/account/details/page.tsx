@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Copy } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { SettingsAccountLayout } from "@/app/(main)/dashboard/settings/_components/settings-account-layout";
 import { SettingsSection } from "@/app/(main)/dashboard/settings/_components/settings-section";
-import { rootUser } from "@/data/users";
+import { getMe, updateMe, uploadAvatar } from "@/lib/api/auth";
+import { API_BASE_URL } from "@/lib/api-config";
 import { getInitials } from "@/lib/utils";
 import { persistPreference } from "@/lib/preferences/preferences-storage";
 import { THEME_MODE_OPTIONS } from "@/lib/preferences/theme";
@@ -74,8 +76,13 @@ const DEFAULT_ISSUE_OPTIONS = [
 
 type AvatarType = "initials" | "upload" | "gravatar";
 
+const ACCEPT_IMAGE = "image/jpeg,image/png,image/gif,image/webp";
+const MAX_AVATAR_MB = 5;
+
 export default function AccountDetailsPage() {
   const [avatarType, setAvatarType] = useState<AvatarType>("initials");
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [language, setLanguage] = useState("pt-BR");
   const [timezone, setTimezone] = useState("America/Sao_Paulo");
   const [use24hClock, setUse24hClock] = useState(false);
@@ -84,22 +91,40 @@ export default function AccountDetailsPage() {
 
   const themeMode = usePreferencesStore((s) => s.themeMode);
   const setThemeMode = usePreferencesStore((s) => s.setThemeMode);
+  const queryClient = useQueryClient();
+
+  const { data: me, isLoading: meLoading } = useQuery({
+    queryKey: ["me"],
+    queryFn: getMe,
+  });
 
   const form = useForm<AccountDetailsFormValues>({
     resolver: zodResolver(accountDetailsSchema),
     defaultValues: {
-      name: rootUser.name,
+      name: "",
     },
   });
 
+  useEffect(() => {
+    if (me?.name !== undefined) {
+      form.reset({ name: me.name ?? "" });
+    }
+  }, [me?.name, form]);
+
   const handleCopyUserId = () => {
-    void navigator.clipboard.writeText(rootUser.id);
+    const id = me?.user_id ?? "";
+    void navigator.clipboard.writeText(id);
     toast.success("User ID copiado.");
   };
 
-  const handleSaveProfile = (data: AccountDetailsFormValues) => {
-    // TODO: PUT /api/users/me
-    toast.success("Conta atualizada.");
+  const handleSaveProfile = async (data: AccountDetailsFormValues) => {
+    try {
+      await updateMe({ name: data.name });
+      await queryClient.invalidateQueries({ queryKey: ["me"] });
+      toast.success("Conta atualizada.");
+    } catch {
+      toast.error("Não foi possível salvar. Tente novamente.");
+    }
   };
 
   const handleThemeChange = (value: string) => {
@@ -107,10 +132,43 @@ export default function AccountDetailsPage() {
     persistPreference("theme_mode", value);
   };
 
-  const handleSaveAvatar = () => {
-    // TODO: persist avatar_type via API
+  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > MAX_AVATAR_MB * 1024 * 1024) {
+      toast.error(`A imagem deve ter no máximo ${MAX_AVATAR_MB}MB.`);
+      return;
+    }
+    if (!ACCEPT_IMAGE.split(",").some((t) => file.type === t.trim())) {
+      toast.error("Use JPEG, PNG, GIF ou WebP.");
+      return;
+    }
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file));
+  };
+
+  const handleSaveAvatar = async () => {
+    if (avatarType === "upload" && avatarFile) {
+      try {
+        await uploadAvatar(avatarFile);
+        await queryClient.invalidateQueries({ queryKey: ["me"] });
+        setAvatarFile(null);
+        if (avatarPreview) {
+          URL.revokeObjectURL(avatarPreview);
+          setAvatarPreview(null);
+        }
+        toast.success("Avatar atualizado.");
+      } catch {
+        toast.error("Não foi possível enviar a foto. Tente novamente.");
+      }
+      return;
+    }
     toast.success("Avatar atualizado.");
   };
+
+  const avatarSrc =
+    avatarPreview ?? (me?.avatar_url ? `${API_BASE_URL}${me.avatar_url}` : undefined);
 
   return (
     <SettingsAccountLayout
@@ -146,7 +204,7 @@ export default function AccountDetailsPage() {
                 <InputGroup>
                   <InputGroupInput
                     readOnly
-                    value={rootUser.id}
+                    value={me?.user_id ?? (meLoading ? "..." : "")}
                     className="bg-muted/50"
                     aria-readonly="true"
                   />
@@ -163,7 +221,9 @@ export default function AccountDetailsPage() {
                   </InputGroupAddon>
                 </InputGroup>
               </div>
-              <Button type="submit">Salvar</Button>
+              <Button type="submit" disabled={meLoading}>
+                Salvar
+              </Button>
             </form>
           </Form>
         </SettingsSection>
@@ -259,8 +319,10 @@ export default function AccountDetailsPage() {
         <SettingsSection title="Avatar">
           <div className="flex flex-col gap-6 md:flex-row md:items-start">
             <Avatar className="size-20 shrink-0">
-              <AvatarImage src={rootUser.avatar || undefined} alt={rootUser.name} />
-              <AvatarFallback className="text-lg">{getInitials(rootUser.name)}</AvatarFallback>
+              <AvatarImage src={avatarSrc} alt={me?.name ?? ""} />
+              <AvatarFallback className="text-lg">
+                {getInitials(me?.name ?? "?")}
+              </AvatarFallback>
             </Avatar>
             <div className="flex flex-1 flex-col gap-4">
               <RadioGroup
@@ -288,7 +350,25 @@ export default function AccountDetailsPage() {
                   </Label>
                 </div>
               </RadioGroup>
-              <Button type="button" variant="secondary" onClick={handleSaveAvatar}>
+              {avatarType === "upload" && (
+                <div className="space-y-2">
+                  <Input
+                    type="file"
+                    accept={ACCEPT_IMAGE}
+                    onChange={handleAvatarFileChange}
+                    className="cursor-pointer"
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    JPEG, PNG, GIF ou WebP. Máximo {MAX_AVATAR_MB}MB.
+                  </p>
+                </div>
+              )}
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleSaveAvatar}
+                disabled={avatarType === "upload" && !avatarFile}
+              >
                 Salvar avatar
               </Button>
             </div>

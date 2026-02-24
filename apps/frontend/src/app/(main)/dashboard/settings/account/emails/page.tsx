@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Info } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +16,7 @@ import {
 } from "@/components/ui/input-group";
 import { SettingsAccountLayout } from "@/app/(main)/dashboard/settings/_components/settings-account-layout";
 import { SettingsSection } from "@/app/(main)/dashboard/settings/_components/settings-section";
-import { rootUser } from "@/data/users";
+import { getMe } from "@/lib/api/auth";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -38,6 +39,11 @@ type AddEmailFormValues = z.infer<typeof addEmailSchema>;
 export default function EmailsPage() {
   const [secondaryEmails] = useState<string[]>([]);
 
+  const { data: me, isLoading: meLoading } = useQuery({
+    queryKey: ["me"],
+    queryFn: getMe,
+  });
+
   const form = useForm<AddEmailFormValues>({
     resolver: zodResolver(addEmailSchema),
     defaultValues: { email: "" },
@@ -57,7 +63,9 @@ export default function EmailsPage() {
       <div className="space-y-8">
         <SettingsSection title="Endereços de e-mail">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm">{rootUser.email}</span>
+            <span className="text-sm">
+              {meLoading ? "..." : me?.email ?? "—"}
+            </span>
             <Badge variant="secondary">Principal</Badge>
           </div>
         </SettingsSection>

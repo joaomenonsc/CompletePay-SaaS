@@ -4,7 +4,10 @@ import { useState } from "react";
 
 import { Copy } from "lucide-react";
 
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -25,6 +28,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { SettingsOrgLayout } from "@/app/(main)/dashboard/settings/_components/settings-org-layout";
 import { useOrgSlug } from "../_hooks/use-org-slug";
+import { updateOrganization, uploadOrganizationAvatar } from "@/lib/api/organizations";
+import { API_BASE_URL } from "@/lib/api-config";
 import { getInitials } from "@/lib/utils";
 import { toast } from "sonner";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -47,36 +52,140 @@ type GeneralFormValues = z.infer<typeof generalSchema>;
 
 type AvatarType = "initials" | "upload" | "url";
 
-const MOCK_ORG_ID = "org-001";
+const ACCEPT_IMAGE = "image/jpeg,image/png,image/gif,image/webp";
+const MAX_AVATAR_MB = 5;
 
 export default function OrgSettingsPage() {
-  const { orgSlug, orgDisplayName } = useOrgSlug();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const { orgSlug, orgDisplayName, org } = useOrgSlug();
   const [earlyAdopter, setEarlyAdopter] = useState(false);
   const [aiFeatures, setAiFeatures] = useState(false);
   const [codeCoverage, setCodeCoverage] = useState(false);
   const [avatarType, setAvatarType] = useState<AvatarType>("initials");
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarUrlValue, setAvatarUrlValue] = useState("");
   const [defaultRole, setDefaultRole] = useState("member");
+  const [saving, setSaving] = useState(false);
+  const [savingAvatar, setSavingAvatar] = useState(false);
 
   const form = useForm<GeneralFormValues>({
     resolver: zodResolver(generalSchema),
+    values: org
+      ? { slug: org.slug, displayName: org.name }
+      : undefined,
     defaultValues: {
       slug: orgSlug,
       displayName: orgDisplayName,
     },
   });
 
-  const onSaveGeneral = (data: GeneralFormValues) => {
-    // TODO: PATCH /api/orgs/{orgId}
-    toast.success("Configurações salvas.");
+  const onSaveGeneral = async (data: GeneralFormValues) => {
+    if (!org?.id) {
+      toast.error("Organização não encontrada.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await updateOrganization(org.id, {
+        name: data.displayName,
+        slug: data.slug,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["organizations"] });
+      toast.success("Configurações salvas.");
+      if (updated.slug !== orgSlug) {
+        router.replace(
+          `/dashboard/settings/org/${encodeURIComponent(updated.slug)}/settings`
+        );
+      }
+    } catch (err: unknown) {
+      const message =
+        err && typeof err === "object" && "response" in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : null;
+      toast.error(message ?? "Erro ao salvar. Tente novamente.");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const onSaveAvatar = () => {
-    toast.success("Avatar atualizado.");
+  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > MAX_AVATAR_MB * 1024 * 1024) {
+      toast.error(`A imagem deve ter no máximo ${MAX_AVATAR_MB}MB.`);
+      return;
+    }
+    if (!ACCEPT_IMAGE.split(",").some((t) => file.type === t.trim())) {
+      toast.error("Use JPEG, PNG, GIF ou WebP.");
+      return;
+    }
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file));
   };
+
+  const onSaveAvatar = async () => {
+    if (!org?.id) {
+      toast.error("Organização não encontrada.");
+      return;
+    }
+    setSavingAvatar(true);
+    try {
+      if (avatarType === "initials") {
+        await updateOrganization(org.id, { avatarUrl: null });
+        await queryClient.invalidateQueries({ queryKey: ["organizations"] });
+        toast.success("Avatar atualizado.");
+        return;
+      }
+      if (avatarType === "upload" && avatarFile) {
+        await uploadOrganizationAvatar(org.id, avatarFile);
+        await queryClient.invalidateQueries({ queryKey: ["organizations"] });
+        setAvatarFile(null);
+        if (avatarPreview) {
+          URL.revokeObjectURL(avatarPreview);
+          setAvatarPreview(null);
+        }
+        toast.success("Avatar atualizado.");
+        return;
+      }
+      if (avatarType === "url" && avatarUrlValue.trim()) {
+        const url = avatarUrlValue.trim();
+        await updateOrganization(org.id, { avatarUrl: url });
+        await queryClient.invalidateQueries({ queryKey: ["organizations"] });
+        toast.success("Avatar atualizado.");
+        return;
+      }
+      toast.error("Selecione uma opção e preencha o campo necessário.");
+    } catch (err: unknown) {
+      const message =
+        err && typeof err === "object" && "response" in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : null;
+      toast.error(message ?? "Erro ao salvar o avatar. Tente novamente.");
+    } finally {
+      setSavingAvatar(false);
+    }
+  };
+
+  const orgAvatarSrc =
+    avatarPreview ??
+    (org?.avatarUrl
+      ? org.avatarUrl.startsWith("http")
+        ? org.avatarUrl
+        : `${API_BASE_URL}${org.avatarUrl}`
+      : undefined);
+  const saveAvatarDisabled =
+    (avatarType === "upload" && !avatarFile) ||
+    (avatarType === "url" && !avatarUrlValue.trim());
 
   const handleCopyOrgId = () => {
-    void navigator.clipboard.writeText(MOCK_ORG_ID);
-    toast.success("Org ID copiado.");
+    const id = org?.id ?? "";
+    if (id) {
+      void navigator.clipboard.writeText(id);
+      toast.success("ID da organização copiado.");
+    }
   };
 
   return (
@@ -126,8 +235,8 @@ export default function OrgSettingsPage() {
                   <InputGroup>
                     <InputGroupInput
                       readOnly
-                      value={MOCK_ORG_ID}
-                      className="bg-muted/50"
+                      value={org?.id ?? ""}
+                      className="bg-muted/50 font-mono text-sm"
                       aria-readonly="true"
                     />
                     <InputGroupAddon align="inline-end">
@@ -157,7 +266,9 @@ export default function OrgSettingsPage() {
                     <Switch id="code-coverage" checked={codeCoverage} onCheckedChange={setCodeCoverage} />
                   </div>
                 </div>
-                <Button type="submit">Salvar</Button>
+                <Button type="submit" disabled={saving}>
+                  {saving ? "Salvando..." : "Salvar"}
+                </Button>
               </form>
             </Form>
           </CardContent>
@@ -191,10 +302,12 @@ export default function OrgSettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle>Avatar</CardTitle>
+            <CardDescription>Imagem ou iniciais exibidas para a organização.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="flex flex-col gap-6 md:flex-row md:items-start">
               <Avatar className="size-20 shrink-0">
+                <AvatarImage src={orgAvatarSrc} alt={orgDisplayName} />
                 <AvatarFallback className="text-lg">{getInitials(orgDisplayName)}</AvatarFallback>
               </Avatar>
               <div className="flex flex-1 flex-col gap-4">
@@ -217,8 +330,35 @@ export default function OrgSettingsPage() {
                     <Label htmlFor="org-avatar-url" className="font-normal cursor-pointer">URL</Label>
                   </div>
                 </RadioGroup>
-                <Button type="button" variant="secondary" onClick={onSaveAvatar}>
-                  Salvar avatar
+                {avatarType === "upload" && (
+                  <div className="space-y-2">
+                    <Input
+                      type="file"
+                      accept={ACCEPT_IMAGE}
+                      onChange={handleAvatarFileChange}
+                      className="cursor-pointer"
+                    />
+                    <p className="text-muted-foreground text-xs">
+                      JPEG, PNG, GIF ou WebP. Máximo {MAX_AVATAR_MB}MB.
+                    </p>
+                  </div>
+                )}
+                {avatarType === "url" && (
+                  <Input
+                    type="url"
+                    placeholder="https://exemplo.com/logo.png"
+                    value={avatarUrlValue}
+                    onChange={(e) => setAvatarUrlValue(e.target.value)}
+                    className="h-9"
+                  />
+                )}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={onSaveAvatar}
+                  disabled={saveAvatarDisabled || savingAvatar}
+                >
+                  {savingAvatar ? "Salvando..." : "Salvar avatar"}
                 </Button>
               </div>
             </div>

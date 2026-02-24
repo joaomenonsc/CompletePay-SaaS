@@ -21,7 +21,7 @@ def require_organization_id(
             status_code=400,
             detail="Header X-Organization-Id e obrigatorio para esta rota.",
         )
-    org_id = x_organization_id.strip()
+    org_id = x_organization_id.strip().lower()
     role = get_membership_role(db, user_id, org_id)
     if role is None:
         raise HTTPException(
