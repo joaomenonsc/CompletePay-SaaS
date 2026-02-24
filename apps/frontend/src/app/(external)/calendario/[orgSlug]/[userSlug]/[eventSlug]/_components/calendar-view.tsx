@@ -147,11 +147,11 @@ export function CalendarView({
   const displayName = profile?.orgName ?? profile?.hostName ?? "Host";
   const displayAvatarUrl = profile?.orgAvatarUrl ?? profile?.avatarUrl ?? null;
   const locationLabel =
-    slotsData?.eventType?.locations?.[0]?.locationType === "video"
+    slotsData?.eventType?.locations?.[0]?.location_type === "video"
       ? "Cal Video"
-      : slotsData?.eventType?.locations?.[0]?.locationType === "in_person"
+      : slotsData?.eventType?.locations?.[0]?.location_type === "in_person"
         ? "Presencial"
-        : slotsData?.eventType?.locations?.[0]?.locationType ?? "Cal Video";
+        : slotsData?.eventType?.locations?.[0]?.location_type ?? "Cal Video";
 
   return (
     <div className="min-h-screen bg-zinc-950 px-4 py-8">

@@ -62,11 +62,11 @@ export function BookingFormView({
   const displayName = profile?.orgName ?? profile?.hostName ?? "Host";
   const displayAvatarUrl = profile?.orgAvatarUrl ?? profile?.avatarUrl ?? null;
   const locationLabel =
-    slotsData?.eventType?.locations?.[0]?.locationType === "video"
+    slotsData?.eventType?.locations?.[0]?.location_type === "video"
       ? "Vídeo"
-      : slotsData?.eventType?.locations?.[0]?.locationType === "in_person"
+      : slotsData?.eventType?.locations?.[0]?.location_type === "in_person"
         ? "Presencial"
-        : slotsData?.eventType?.locations?.[0]?.locationType ?? "Vídeo";
+        : slotsData?.eventType?.locations?.[0]?.location_type ?? "Vídeo";
 
   function handleBack() {
     router.back();
