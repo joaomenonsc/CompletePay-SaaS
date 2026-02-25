@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import type { Metadata } from "next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 import { Toaster } from "@/components/ui/sonner";
 import { APP_CONFIG } from "@/config/app-config";
@@ -47,6 +48,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
           >
             {children}
             <Toaster />
+            <SpeedInsights />
           </PreferencesStoreProvider>
         </QueryProvider>
       </body>
