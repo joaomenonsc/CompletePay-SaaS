@@ -6,12 +6,17 @@ import { BookingPageContent } from "./_components/booking-page-content";
 
 interface Props {
   params: Promise<{ orgSlug: string; userSlug: string; eventSlug: string }>;
-  searchParams: Promise<{ slot?: string }>;
+  searchParams: Promise<{
+    slot?: string;
+    rescheduleUid?: string;
+    rescheduledBy?: string;
+    overlayCalendar?: string;
+  }>;
 }
 
 export default async function BookingPage({ params, searchParams }: Props) {
   const { orgSlug, userSlug, eventSlug } = await params;
-  const { slot } = await searchParams;
+  const { slot, rescheduleUid, rescheduledBy, overlayCalendar } = await searchParams;
 
   return (
     <BookingPageContent
@@ -19,6 +24,9 @@ export default async function BookingPage({ params, searchParams }: Props) {
       userSlug={userSlug}
       eventSlug={eventSlug}
       initialSlot={slot}
+      rescheduleUid={rescheduleUid}
+      rescheduledBy={rescheduledBy}
+      overlayCalendar={overlayCalendar}
     />
   );
 }

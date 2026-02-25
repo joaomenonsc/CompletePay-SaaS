@@ -15,6 +15,9 @@ interface Props {
   userSlug: string;
   eventSlug: string;
   initialSlot?: string;
+  rescheduleUid?: string;
+  rescheduledBy?: string;
+  overlayCalendar?: string;
 }
 
 export function BookingPageContent({
@@ -22,6 +25,9 @@ export function BookingPageContent({
   userSlug,
   eventSlug,
   initialSlot,
+  rescheduleUid,
+  rescheduledBy,
+  overlayCalendar,
 }: Props) {
   const searchParams = useSearchParams();
   const selectedSlot = searchParams.get("slot") ?? initialSlot;
@@ -34,6 +40,7 @@ export function BookingPageContent({
         userSlug={userSlug}
         eventSlug={eventSlug}
         selectedSlot={selectedSlot}
+        rescheduleUid={rescheduleUid}
       />
     );
   }
@@ -43,6 +50,7 @@ export function BookingPageContent({
       orgSlug={orgSlug}
       userSlug={userSlug}
       eventSlug={eventSlug}
+      rescheduleUid={rescheduleUid}
     />
   );
 }

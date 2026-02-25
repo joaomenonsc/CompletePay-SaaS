@@ -82,6 +82,14 @@ export interface AvailableSlotsData {
   days: DaySlots[];
 }
 
+export interface BookingAttendee {
+  id: string;
+  booking_id: string;
+  name: string;
+  email: string;
+  is_optional: boolean;
+}
+
 export interface Booking {
   id: string;
   uid: string;
@@ -104,6 +112,10 @@ export interface Booking {
   cancellationReason: string | null;
   cancelledBy: "host" | "guest" | "system" | null;
   meetingUrl: string | null;
+  /** Preenchido quando a reserva foi reagendada (data/hora do horário anterior). */
+  rescheduledFrom: string | null;
+  /** Participantes adicionais (além do guest principal). */
+  attendees?: BookingAttendee[];
   createdAt: string;
   updatedAt: string;
 }

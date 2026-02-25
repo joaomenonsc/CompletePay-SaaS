@@ -16,6 +16,7 @@ from src.db.session import get_db, SessionLocal
 from src.schemas.calendar import (
     BookingCreatePublic,
     BookingCancelPublic,
+    BookingReschedulePublic,
     BookingPublicResponse,
     PublicProfileResponse,
     PublicEventTypeItem,
@@ -31,9 +32,14 @@ from src.services.booking_service import (
     create_booking,
     get_booking_by_uid,
     cancel_booking_by_token,
+    reschedule_booking_by_token,
     _resolve_event_type,
 )
-from src.services.email_service import EmailService
+from src.services.email_service import (
+    EmailService,
+    send_cancellation_email_task,
+    send_rescheduled_email_task,
+)
 from src.services.webhook_service import dispatch_webhooks_for_booking_task
 
 router = APIRouter(
@@ -191,7 +197,9 @@ def get_public_slots(
 
 
 def _send_booking_emails_task(booking_id: str, base_url: str = "") -> None:
-    """Background task: envia emails de confirmacao (guest) via Resend."""
+    """Background task: envia emails de confirmacao (guest e host) via Resend."""
+    from src.config.settings import get_settings
+
     db = SessionLocal()
     try:
         booking = db.execute(
@@ -204,10 +212,17 @@ def _send_booking_emails_task(booking_id: str, base_url: str = "") -> None:
         ).scalars().one_or_none()
         if not event_type:
             return
+        url = (base_url or "").strip() or (get_settings().frontend_url or "")
         email_svc = EmailService(db)
         email_svc.send_booking_confirmation_to_guest(
-            booking, event_type, base_url=base_url
+            booking, event_type, base_url=url
         )
+        if booking.host_user_id:
+            user = get_user_by_id(booking.host_user_id)
+            if user and getattr(user, "email", None):
+                email_svc.send_booking_confirmation_to_host(
+                    booking, event_type, host_email=user.email
+                )
     finally:
         db.close()
 
@@ -224,12 +239,14 @@ def post_public_booking(
     db: Session = Depends(get_db),
 ):
     """Cria uma reserva (publico). Retorna 409 se o slot nao estiver mais disponivel."""
+    from src.config.settings import get_settings
+
     try:
         booking = create_booking(db, body)
     except SlotConflictError as e:
         raise HTTPException(status_code=409, detail=e.message)
 
-    base_url = str(request.base_url).rstrip("/")
+    base_url = (get_settings().frontend_url or str(request.base_url)).rstrip("/")
     background_tasks.add_task(_send_booking_emails_task, str(booking.id), base_url)
     background_tasks.add_task(dispatch_webhooks_for_booking_task, str(booking.id), "booking.created")
 
@@ -336,4 +353,69 @@ def post_public_booking_cancel(
     background_tasks.add_task(
         dispatch_webhooks_for_booking_task, str(booking.id), "booking.cancelled"
     )
+    background_tasks.add_task(
+        send_cancellation_email_task, str(booking.id), body.reason
+    )
     return {"status": "cancelled"}
+
+
+@router.post(
+    "/bookings/{uid}/reschedule",
+    response_model=BookingPublicResponse,
+)
+def post_public_booking_reschedule(
+    uid: str,
+    body: BookingReschedulePublic,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Reagenda uma reserva pelo guest (atualiza a mesma reserva). Token obrigatorio."""
+    try:
+        booking = reschedule_booking_by_token(
+            db,
+            uid,
+            body.cancel_token,
+            body.new_start_time,
+            body.timezone,
+        )
+    except SlotConflictError as e:
+        raise HTTPException(status_code=409, detail=e.message)
+
+    background_tasks.add_task(
+        dispatch_webhooks_for_booking_task, str(booking.id), "booking.rescheduled"
+    )
+    background_tasks.add_task(send_rescheduled_email_task, str(booking.id))
+
+    event_type = db.execute(
+        select(EventType).where(EventType.id == booking.event_type_id)
+    ).scalars().one_or_none()
+    event_title = event_type.title if event_type else ""
+
+    host_name = "Host"
+    if booking.host_agent_config_id:
+        agent = db.execute(
+            select(AgentConfig).where(
+                AgentConfig.id == booking.host_agent_config_id
+            )
+        ).scalars().one_or_none()
+        if agent:
+            host_name = agent.name
+
+    return BookingPublicResponse(
+        uid=booking.uid,
+        event_title=event_title,
+        host_name=host_name,
+        guest_name=booking.guest_name,
+        guest_email=booking.guest_email,
+        start_time=booking.start_time.isoformat(),
+        end_time=booking.end_time.isoformat(),
+        duration_minutes=booking.duration_minutes,
+        timezone=booking.timezone,
+        status=(
+            booking.status.value
+            if hasattr(booking.status, "value")
+            else str(booking.status)
+        ),
+        meeting_url=booking.meeting_url,
+        cancel_token=booking.cancel_token,
+    )

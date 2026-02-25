@@ -13,8 +13,10 @@ import { toast } from "sonner";
 
 import {
   createPublicBooking,
+  fetchPublicBookingByUid,
   fetchPublicProfile,
   fetchPublicSlots,
+  reschedulePublicBooking,
 } from "@/lib/api/calendar-public";
 
 import { BookingForm, type BookingFormData } from "./booking-form";
@@ -25,6 +27,7 @@ export interface BookingFormViewProps {
   userSlug: string;
   eventSlug: string;
   selectedSlot: string;
+  rescheduleUid?: string;
 }
 
 export function BookingFormView({
@@ -32,6 +35,7 @@ export function BookingFormView({
   userSlug,
   eventSlug,
   selectedSlot,
+  rescheduleUid,
 }: BookingFormViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -57,6 +61,12 @@ export function BookingFormView({
     enabled: Boolean(orgSlug && eventSlug && monthStr && timezone),
   });
 
+  const { data: previousBooking } = useQuery({
+    queryKey: ["calendar-public-booking", rescheduleUid],
+    queryFn: () => fetchPublicBookingByUid(rescheduleUid!),
+    enabled: Boolean(rescheduleUid),
+  });
+
   const eventTitle = slotsData?.eventType?.title ?? "Evento";
   const durationMinutes = slotsData?.eventType?.durationMinutes ?? 30;
   const displayName = profile?.orgName ?? profile?.hostName ?? "Host";
@@ -74,6 +84,17 @@ export function BookingFormView({
 
   async function handleConfirm(formData: BookingFormData) {
     try {
+      if (rescheduleUid && previousBooking) {
+        const booking = await reschedulePublicBooking(rescheduleUid, {
+          cancel_token: previousBooking.cancelToken,
+          new_start_time: selectedSlot,
+          timezone,
+        });
+        toast.success("Reagendamento realizado!");
+        router.push(`/calendario/booking/${booking.uid}`);
+        return;
+      }
+
       const booking = await createPublicBooking({
         org_slug: orgSlug,
         event_type_slug: eventSlug,
@@ -93,13 +114,15 @@ export function BookingFormView({
         "response" in err &&
         (err as { response?: { status?: number } }).response?.status === 409
           ? "Este horário não está mais disponível. Escolha outro."
-          : "Não foi possível agendar. Tente novamente.";
+          : rescheduleUid
+            ? "Não foi possível reagendar. Tente novamente."
+            : "Não foi possível agendar. Tente novamente.";
       toast.error(message);
     }
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
+    <main className="mx-auto max-w-3xl px-4 py-8" role="main" aria-label="Confirmar agendamento">
       <div className="grid grid-cols-1 overflow-hidden rounded-xl border border-border bg-card md:grid-cols-[280px_1fr] md:divide-x md:divide-border">
         <div className="border-b border-border p-6 md:border-b-0">
           <BookingSummary
@@ -111,13 +134,21 @@ export function BookingFormView({
             timezone={timezone}
             slotDate={slotDate}
             onBack={handleBack}
+            previousBooking={previousBooking ?? undefined}
+            isReschedule={Boolean(rescheduleUid)}
           />
         </div>
 
         <div className="p-6">
-          <BookingForm onSubmit={handleConfirm} />
+          <BookingForm
+            onSubmit={handleConfirm}
+            defaultName={previousBooking?.guestName ?? ""}
+            defaultEmail={previousBooking?.guestEmail ?? ""}
+            nameAndEmailReadOnly={Boolean(rescheduleUid && previousBooking)}
+            submitLabel={rescheduleUid ? "Reagendar" : "Confirmar"}
+          />
         </div>
       </div>
-    </div>
+    </main>
   );
 }

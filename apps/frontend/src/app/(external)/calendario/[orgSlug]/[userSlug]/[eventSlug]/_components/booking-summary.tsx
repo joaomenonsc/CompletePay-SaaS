@@ -2,11 +2,12 @@
 
 /**
  * Coluna esquerda da Tela 3: resumo do agendamento + botão Voltar.
- * Tutorial: docs/calendario/paginas-publicas-booking-tutorial.md § 6.2
+ * Em modo reagendamento exibe "Horário anterior" e o novo horário.
  */
 import { Calendar, Clock, Globe, Video } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import type { BookingPublic } from "@/types/calendar";
 
 export interface BookingSummaryProps {
   hostName: string;
@@ -17,6 +18,10 @@ export interface BookingSummaryProps {
   timezone: string;
   slotDate: Date;
   onBack: () => void;
+  /** Reserva anterior (em modo reagendamento). */
+  previousBooking?: BookingPublic;
+  /** Se true, exibe "Horário anterior" e "Novo horário". */
+  isReschedule?: boolean;
 }
 
 export function BookingSummary({
@@ -28,6 +33,8 @@ export function BookingSummary({
   timezone,
   slotDate,
   onBack,
+  previousBooking,
+  isReschedule,
 }: BookingSummaryProps) {
   const endDate = new Date(slotDate);
   endDate.setMinutes(endDate.getMinutes() + durationMinutes);
@@ -48,6 +55,35 @@ export function BookingSummary({
     minute: "2-digit",
     hour12: false,
   });
+
+  const previousStart = previousBooking?.startTime
+    ? new Date(previousBooking.startTime)
+    : null;
+  const previousEnd = previousBooking?.endTime
+    ? new Date(previousBooking.endTime)
+    : null;
+  const previousDateLabel = previousStart
+    ? previousStart.toLocaleDateString("pt-BR", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })
+    : null;
+  const previousStartTime = previousStart
+    ? previousStart.toLocaleTimeString("pt-BR", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })
+    : null;
+  const previousEndTime = previousEnd
+    ? previousEnd.toLocaleTimeString("pt-BR", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })
+    : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -72,12 +108,32 @@ export function BookingSummary({
       <h1 className="text-xl font-bold text-foreground">{eventTitle}</h1>
 
       <div className="flex flex-col gap-2 text-sm text-muted-foreground">
+        {isReschedule && previousDateLabel && previousStartTime && previousEndTime && (
+          <div className="flex items-start gap-2">
+            <Calendar className="mt-0.5 size-4 shrink-0" />
+            <div>
+              <p className="font-medium text-foreground">Horário anterior</p>
+              <p className="capitalize">{previousDateLabel}</p>
+              <p>{previousStartTime}</p>
+            </div>
+          </div>
+        )}
         <div className="flex items-start gap-2">
           <Calendar className="mt-0.5 size-4 shrink-0" />
           <div>
-            <p className="font-medium text-foreground">{dateLabel}</p>
-            <p>
-              {startTime} – {endTime}
+            <p className="font-medium text-foreground">
+              {isReschedule ? "Novo horário" : dateLabel}
+            </p>
+            <p className={isReschedule ? undefined : ""}>
+              {isReschedule ? (
+                <>
+                  <span className="capitalize">{dateLabel}</span>
+                  <br />
+                  {startTime} – {endTime}
+                </>
+              ) : (
+                `${startTime} – ${endTime}`
+              )}
             </p>
           </div>
         </div>

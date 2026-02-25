@@ -2,11 +2,14 @@
 
 /**
  * Coluna esquerda da Tela 2: avatar, nome, título do evento, duração, tipo, fuso.
- * Tutorial: docs/calendario/paginas-publicas-booking-tutorial.md § 4.3
+ * Em modo reagendamento exibe também "Horário anterior".
  */
-import { Clock, Globe, Video } from "lucide-react";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { Calendar, Clock, Globe, Video } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import type { BookingPublic } from "@/types/calendar";
 import {
   Select,
   SelectContent,
@@ -46,6 +49,8 @@ export interface EventInfoProps {
   locationLabel: string;
   timezone: string;
   onTimezoneChange: (value: string) => void;
+  /** Reserva anterior (em modo reagendamento) para exibir "Horário anterior". */
+  previousBooking?: BookingPublic;
 }
 
 export function EventInfo({
@@ -56,7 +61,18 @@ export function EventInfo({
   locationLabel,
   timezone,
   onTimezoneChange,
+  previousBooking,
 }: EventInfoProps) {
+  const previousStart = previousBooking?.startTime
+    ? new Date(previousBooking.startTime)
+    : null;
+  const previousDateLabel = previousStart
+    ? format(previousStart, "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR })
+    : null;
+  const previousTimeLabel = previousStart
+    ? format(previousStart, "HH:mm", { locale: ptBR })
+    : null;
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
@@ -70,6 +86,19 @@ export function EventInfo({
       </div>
 
       <h1 className="text-xl font-bold text-white">{eventTitle}</h1>
+
+      {previousDateLabel && previousTimeLabel && (
+        <div className="flex flex-col gap-1 text-sm text-zinc-400">
+          <div className="flex items-start gap-2">
+            <Calendar className="mt-0.5 size-4 shrink-0" />
+            <div>
+              <p className="font-medium text-white">Horário anterior</p>
+              <p className="capitalize">{previousDateLabel}</p>
+              <p>{previousTimeLabel}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2 text-sm text-zinc-400">
         <div className="flex items-center gap-2">

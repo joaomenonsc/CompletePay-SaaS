@@ -225,3 +225,23 @@ export async function cancelPublicBooking(
     { cancel_token: cancelToken, reason }
   );
 }
+
+/** Reagenda uma reserva existente (atualiza a mesma reserva, não cria outra). */
+export async function reschedulePublicBooking(
+  uid: string,
+  body: {
+    cancel_token: string;
+    new_start_time: string;
+    timezone: string;
+  }
+): Promise<BookingPublic> {
+  const { data } = await publicClient.post<ApiBookingPublic>(
+    `/api/v1/public/calendar/bookings/${uid}/reschedule`,
+    {
+      cancel_token: body.cancel_token,
+      new_start_time: body.new_start_time,
+      timezone: body.timezone,
+    }
+  );
+  return toBookingPublic(data);
+}

@@ -33,9 +33,12 @@ from src.db.models_calendar import (
 )
 from src.db.session import get_db
 from src.schemas.calendar import (
+    AddBookingAttendeesRequest,
     BookingCancelHost,
     BookingRescheduleHost,
     BookingResponse,
+    ReportBookingRequest,
+    RequestRescheduleBookingRequest,
     EventTypeCreate,
     EventTypeLimitResponse,
     EventTypeLimitUpsert,
@@ -53,6 +56,12 @@ from src.schemas.calendar import (
     WorkflowResponse,
     WorkflowStepCreate,
     WorkflowUpdate,
+)
+from src.services.email_service import (
+    send_add_participants_emails_task,
+    send_cancellation_email_task,
+    send_request_reschedule_email_task,
+    send_rescheduled_email_task,
 )
 from src.services.webhook_service import dispatch_webhooks_for_booking_task
 
@@ -560,6 +569,114 @@ def get_booking(
     return BookingResponse.from_orm_row(booking)
 
 
+@router.post(
+    "/bookings/{booking_id}/attendees",
+    response_model=BookingResponse,
+)
+def add_booking_attendees(
+    booking_id: str,
+    body: AddBookingAttendeesRequest,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(require_user_id),
+    organization_id: str = Depends(require_organization_id),
+    db: Session = Depends(get_db),
+):
+    """Adiciona participantes adicionais (e-mails) à reserva."""
+    from src.services.booking_service import add_attendees_to_booking
+
+    booking, added_emails = add_attendees_to_booking(
+        db, booking_id, organization_id, body.emails
+    )
+    if added_emails:
+        background_tasks.add_task(
+            send_add_participants_emails_task, str(booking.id), added_emails
+        )
+        background_tasks.add_task(
+            dispatch_webhooks_for_booking_task, str(booking.id), "booking.attendees_added"
+        )
+    return BookingResponse.from_orm_row(booking)
+
+
+@router.post(
+    "/bookings/{booking_id}/request-reschedule",
+    response_model=BookingResponse,
+)
+def request_reschedule_booking(
+    booking_id: str,
+    body: RequestRescheduleBookingRequest,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(require_user_id),
+    organization_id: str = Depends(require_organization_id),
+    db: Session = Depends(get_db),
+):
+    """Cancela a reserva e envia email ao convidado solicitando que escolha novo horário."""
+    from src.services.booking_service import cancel_booking_by_host
+
+    booking = cancel_booking_by_host(
+        db,
+        booking_id,
+        organization_id,
+        reason="Solicitação de reagendamento pelo organizador.",
+    )
+    background_tasks.add_task(
+        dispatch_webhooks_for_booking_task, str(booking.id), "booking.cancelled"
+    )
+    background_tasks.add_task(
+        send_request_reschedule_email_task, str(booking.id), body.reason
+    )
+    return BookingResponse.from_orm_row(booking)
+
+
+@router.patch(
+    "/bookings/{booking_id}/mark-no-show",
+    response_model=BookingResponse,
+)
+def mark_booking_no_show_route(
+    booking_id: str,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(require_user_id),
+    organization_id: str = Depends(require_organization_id),
+    db: Session = Depends(get_db),
+):
+    """Marca a reserva como não compareceu (apenas após o horário de fim do evento)."""
+    from src.services.booking_service import mark_booking_no_show
+
+    booking = mark_booking_no_show(db, booking_id, organization_id)
+    background_tasks.add_task(
+        dispatch_webhooks_for_booking_task, str(booking.id), "booking.no_show"
+    )
+    return BookingResponse.from_orm_row(booking)
+
+
+@router.post(
+    "/bookings/{booking_id}/report",
+    response_model=BookingResponse,
+)
+def report_booking_route(
+    booking_id: str,
+    body: ReportBookingRequest,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(require_user_id),
+    organization_id: str = Depends(require_organization_id),
+    db: Session = Depends(get_db),
+):
+    """Reporta a reserva como suspeita e cancela automaticamente."""
+    from src.services.booking_service import report_booking
+
+    booking = report_booking(
+        db, booking_id, organization_id,
+        reason=body.reason,
+        description=body.description,
+    )
+    background_tasks.add_task(
+        dispatch_webhooks_for_booking_task, str(booking.id), "booking.cancelled"
+    )
+    background_tasks.add_task(
+        send_cancellation_email_task, str(booking.id), booking.cancellation_reason
+    )
+    return BookingResponse.from_orm_row(booking)
+
+
 @router.patch(
     "/bookings/{booking_id}/cancel",
     response_model=BookingResponse,
@@ -580,6 +697,9 @@ def cancel_booking_host(
     )
     background_tasks.add_task(
         dispatch_webhooks_for_booking_task, str(booking.id), "booking.cancelled"
+    )
+    background_tasks.add_task(
+        send_cancellation_email_task, str(booking.id), body.reason
     )
     return BookingResponse.from_orm_row(booking)
 
@@ -624,6 +744,7 @@ def reschedule_booking_host(
     background_tasks.add_task(
         dispatch_webhooks_for_booking_task, str(booking.id), "booking.rescheduled"
     )
+    background_tasks.add_task(send_rescheduled_email_task, str(booking.id))
     return BookingResponse.from_orm_row(booking)
 
 

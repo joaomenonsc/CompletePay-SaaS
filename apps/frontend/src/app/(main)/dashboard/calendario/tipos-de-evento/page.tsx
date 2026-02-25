@@ -40,8 +40,8 @@ export default function TiposDeEventoPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <main className="space-y-6" role="main" aria-label="Tipos de evento">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Tipos de evento</h1>
           <p className="text-muted-foreground text-sm">
@@ -52,8 +52,8 @@ export default function TiposDeEventoPage() {
           {publicCalendarUrl && (
             <>
               <Button asChild variant="outline" size="sm">
-                <Link href={publicCalendarUrl} target="_blank" rel="noopener noreferrer">
-                  <ExternalLink className="mr-2 size-4" />
+                <Link href={publicCalendarUrl} target="_blank" rel="noopener noreferrer" aria-label="Ver página pública do calendário (abre em nova aba)">
+                  <ExternalLink className="mr-2 size-4" aria-hidden />
                   Ver página pública
                 </Link>
               </Button>
@@ -70,10 +70,10 @@ export default function TiposDeEventoPage() {
             </Link>
           </Button>
         </div>
-      </div>
+      </header>
 
       {error && (
-        <p className="text-destructive text-sm">Erro ao carregar tipos de evento.</p>
+        <p className="text-destructive text-sm" role="alert">Erro ao carregar tipos de evento.</p>
       )}
 
       {isLoading ? (
@@ -99,6 +99,6 @@ export default function TiposDeEventoPage() {
           </Button>
         </div>
       )}
-    </div>
+    </main>
   );
 }

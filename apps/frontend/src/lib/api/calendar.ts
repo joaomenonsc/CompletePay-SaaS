@@ -244,6 +244,14 @@ export async function createSchedule(body: {
   return toSchedule(data);
 }
 
+interface BookingAttendeeApiResponse {
+  id: string;
+  booking_id: string;
+  name: string;
+  email: string;
+  is_optional: boolean;
+}
+
 interface BookingApiResponse {
   id: string;
   uid: string;
@@ -261,6 +269,8 @@ interface BookingApiResponse {
   cancellation_reason?: string | null;
   cancelled_by?: string | null;
   meeting_url?: string | null;
+  rescheduled_from?: string | null;
+  attendees?: BookingAttendeeApiResponse[];
   createdAt: string;
   updatedAt: string;
 }
@@ -283,6 +293,14 @@ function toBooking(r: BookingApiResponse): Booking {
     cancellationReason: r.cancellation_reason ?? null,
     cancelledBy: (r.cancelled_by as Booking["cancelledBy"]) ?? null,
     meetingUrl: r.meeting_url ?? null,
+    rescheduledFrom: r.rescheduled_from ?? null,
+    attendees: (r.attendees ?? []).map((a) => ({
+      id: a.id,
+      booking_id: a.booking_id,
+      name: a.name,
+      email: a.email,
+      is_optional: a.is_optional,
+    })),
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -325,6 +343,46 @@ export async function rescheduleBookingHost(
   const { data } = await apiClient.patch<BookingApiResponse>(
     `/api/v1/calendar/bookings/${id}/reschedule`,
     body
+  );
+  return toBooking(data);
+}
+
+export async function addBookingAttendees(
+  bookingId: string,
+  emails: string[]
+): Promise<Booking> {
+  const { data } = await apiClient.post<BookingApiResponse>(
+    `/api/v1/calendar/bookings/${bookingId}/attendees`,
+    { emails }
+  );
+  return toBooking(data);
+}
+
+export async function markBookingNoShow(bookingId: string): Promise<Booking> {
+  const { data } = await apiClient.patch<BookingApiResponse>(
+    `/api/v1/calendar/bookings/${bookingId}/mark-no-show`
+  );
+  return toBooking(data);
+}
+
+export async function reportBooking(
+  bookingId: string,
+  body: { reason: string; description?: string | null }
+): Promise<Booking> {
+  const { data } = await apiClient.post<BookingApiResponse>(
+    `/api/v1/calendar/bookings/${bookingId}/report`,
+    body
+  );
+  return toBooking(data);
+}
+
+export async function requestRescheduleBooking(
+  bookingId: string,
+  reason?: string | null
+): Promise<Booking> {
+  const { data } = await apiClient.post<BookingApiResponse>(
+    `/api/v1/calendar/bookings/${bookingId}/request-reschedule`,
+    { reason: reason || undefined }
   );
   return toBooking(data);
 }

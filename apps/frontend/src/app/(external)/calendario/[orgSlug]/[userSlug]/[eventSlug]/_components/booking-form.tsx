@@ -2,9 +2,9 @@
 
 /**
  * Formulário de confirmação da Tela 3 (coluna direita).
- * Tutorial: docs/calendario/paginas-publicas-booking-tutorial.md § 6.3
+ * Em modo reagendamento, nome e e-mail vêm pré-preenchidos e ficam imutáveis.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -16,16 +16,33 @@ export interface BookingFormData {
 
 export interface BookingFormProps {
   onSubmit: (data: BookingFormData) => Promise<void>;
+  /** Em reagendamento: nome e e-mail vêm da reserva anterior e ficam imutáveis. */
+  defaultName?: string;
+  defaultEmail?: string;
+  nameAndEmailReadOnly?: boolean;
+  /** Rótulo do botão de envio (ex.: "Reagendar" em modo reagendamento). */
+  submitLabel?: string;
 }
 
-export function BookingForm({ onSubmit }: BookingFormProps) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+export function BookingForm({
+  onSubmit,
+  defaultName = "",
+  defaultEmail = "",
+  nameAndEmailReadOnly = false,
+  submitLabel = "Confirmar",
+}: BookingFormProps) {
+  const [name, setName] = useState(defaultName);
+  const [email, setEmail] = useState(defaultEmail);
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<
     Partial<Record<keyof BookingFormData, string>>
   >({});
+
+  useEffect(() => {
+    if (nameAndEmailReadOnly && defaultName) setName(defaultName);
+    if (nameAndEmailReadOnly && defaultEmail) setEmail(defaultEmail);
+  }, [nameAndEmailReadOnly, defaultName, defaultEmail]);
 
   function validate(): boolean {
     const newErrors: typeof errors = {};
@@ -52,14 +69,22 @@ export function BookingForm({ onSubmit }: BookingFormProps) {
     }
   }
 
-  const inputClass = (hasError: boolean) =>
+  const inputClass = (hasError: boolean, readOnly?: boolean) =>
     cn(
-      "rounded-lg border px-3 py-2 text-sm bg-background text-foreground outline-none transition-colors focus:ring-2 focus:ring-ring",
+      "rounded-lg border px-3 py-2 text-sm outline-none transition-colors",
+      readOnly
+        ? "cursor-default border-border bg-muted text-foreground read-only:outline-none"
+        : "bg-background text-foreground focus:ring-2 focus:ring-ring",
       hasError ? "border-destructive" : "border-border"
     );
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+    <form
+      onSubmit={handleSubmit}
+      className="flex flex-col gap-5"
+      aria-label="Formulário de confirmação de agendamento"
+      noValidate
+    >
       <div className="flex flex-col gap-1.5">
         <label
           htmlFor="booking-name"
@@ -71,11 +96,17 @@ export function BookingForm({ onSubmit }: BookingFormProps) {
           id="booking-name"
           type="text"
           value={name}
-          onChange={(e) => setName(e.target.value)}
-          className={inputClass(!!errors.name)}
+          onChange={(e) => !nameAndEmailReadOnly && setName(e.target.value)}
+          readOnly={nameAndEmailReadOnly}
+          className={inputClass(!!errors.name, nameAndEmailReadOnly)}
+          aria-invalid={!!errors.name}
+          aria-describedby={errors.name ? "booking-name-error" : undefined}
+          autoComplete="name"
         />
         {errors.name && (
-          <p className="text-xs text-destructive">{errors.name}</p>
+          <p id="booking-name-error" className="text-xs text-destructive" role="alert">
+            {errors.name}
+          </p>
         )}
       </div>
 
@@ -90,11 +121,17 @@ export function BookingForm({ onSubmit }: BookingFormProps) {
           id="booking-email"
           type="email"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className={inputClass(!!errors.email)}
+          onChange={(e) => !nameAndEmailReadOnly && setEmail(e.target.value)}
+          readOnly={nameAndEmailReadOnly}
+          className={inputClass(!!errors.email, nameAndEmailReadOnly)}
+          aria-invalid={!!errors.email}
+          aria-describedby={errors.email ? "booking-email-error" : undefined}
+          autoComplete="email"
         />
         {errors.email && (
-          <p className="text-xs text-destructive">{errors.email}</p>
+          <p id="booking-email-error" className="text-xs text-destructive" role="alert">
+            {errors.email}
+          </p>
         )}
       </div>
 
@@ -131,16 +168,23 @@ export function BookingForm({ onSubmit }: BookingFormProps) {
         <button
           type="button"
           onClick={() => window.history.back()}
-          className="rounded-lg border border-border px-4 py-2 text-sm text-foreground hover:bg-accent"
+          className="rounded-lg border border-border px-4 py-2 text-sm text-foreground hover:bg-accent focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-none"
+          aria-label="Voltar para seleção de horário"
         >
           Voltar
         </button>
         <button
           type="submit"
           disabled={isSubmitting}
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+          aria-busy={isSubmitting}
+          aria-disabled={isSubmitting}
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-none"
         >
-          {isSubmitting ? "Confirmando..." : "Confirmar"}
+          {isSubmitting
+            ? submitLabel === "Reagendar"
+              ? "Reagendando..."
+              : "Confirmando..."
+            : submitLabel}
         </button>
       </div>
     </form>

@@ -16,8 +16,8 @@ export default function DisponibilidadePage() {
   });
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <main className="space-y-6" role="main" aria-label="Disponibilidade">
+      <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Disponibilidade</h1>
           <p className="text-muted-foreground text-sm">
@@ -30,10 +30,10 @@ export default function DisponibilidadePage() {
             Novo schedule
           </Link>
         </Button>
-      </div>
+      </header>
 
       {error && (
-        <p className="text-destructive text-sm">Erro ao carregar schedules.</p>
+        <p className="text-destructive text-sm" role="alert">Erro ao carregar schedules.</p>
       )}
 
       {isLoading ? (
@@ -79,6 +79,6 @@ export default function DisponibilidadePage() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </main>
   );
 }

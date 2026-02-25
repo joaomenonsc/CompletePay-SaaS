@@ -62,6 +62,8 @@ class WebhookEvent(str, enum.Enum):
     booking_created = "booking.created"
     booking_cancelled = "booking.cancelled"
     booking_rescheduled = "booking.rescheduled"
+    booking_no_show = "booking.no_show"
+    booking_attendees_added = "booking.attendees_added"
 
 
 class WorkflowTriggerType(str, enum.Enum):

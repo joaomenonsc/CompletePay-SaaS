@@ -1145,6 +1145,8 @@ const WEBHOOK_EVENTS = [
   { value: "booking.created", label: "Reserva criada" },
   { value: "booking.cancelled", label: "Reserva cancelada" },
   { value: "booking.rescheduled", label: "Reserva reagendada" },
+  { value: "booking.no_show", label: "Marcado como não compareceu" },
+  { value: "booking.attendees_added", label: "Participantes adicionados" },
 ];
 
 function WebhooksTab({ eventTypeId }: { eventTypeId: string }) {
@@ -1198,7 +1200,7 @@ function WebhooksTab({ eventTypeId }: { eventTypeId: string }) {
       <CardHeader>
         <CardTitle>Webhooks</CardTitle>
         <CardDescription>
-          Notificações HTTP quando reservas são criadas, canceladas ou reagendadas.
+          Notificações HTTP quando reservas são criadas, canceladas, reagendadas, marcadas como não compareceu ou quando participantes são adicionados.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">

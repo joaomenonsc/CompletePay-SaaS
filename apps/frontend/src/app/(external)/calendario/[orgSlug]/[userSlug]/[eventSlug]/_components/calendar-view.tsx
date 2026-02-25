@@ -16,7 +16,11 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { fetchPublicProfile, fetchPublicSlots } from "@/lib/api/calendar-public";
+import {
+  fetchPublicBookingByUid,
+  fetchPublicProfile,
+  fetchPublicSlots,
+} from "@/lib/api/calendar-public";
 
 import { CalendarGrid } from "./calendar-grid";
 import { EventInfo } from "./event-info";
@@ -26,12 +30,14 @@ export interface CalendarViewProps {
   orgSlug: string;
   userSlug: string;
   eventSlug: string;
+  rescheduleUid?: string;
 }
 
 export function CalendarView({
   orgSlug,
   userSlug,
   eventSlug,
+  rescheduleUid,
 }: CalendarViewProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -61,6 +67,12 @@ export function CalendarView({
     queryKey: ["calendar-public-profile", orgSlug, userSlug],
     queryFn: () => fetchPublicProfile(orgSlug, userSlug),
     enabled: Boolean(orgSlug && userSlug),
+  });
+
+  const { data: previousBooking } = useQuery({
+    queryKey: ["calendar-public-booking", rescheduleUid],
+    queryFn: () => fetchPublicBookingByUid(rescheduleUid!),
+    enabled: Boolean(rescheduleUid),
   });
 
   const { data: slotsData, isLoading: loadingSlots } = useQuery({
@@ -204,6 +216,7 @@ export function CalendarView({
               locationLabel={locationLabel}
               timezone={timezone}
               onTimezoneChange={setTimezone}
+              previousBooking={previousBooking ?? undefined}
             />
           </div>
 

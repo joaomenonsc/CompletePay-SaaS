@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from src.db.models import AgentConfig, Organization
 from src.db.models_calendar import (
     Booking,
+    BookingAttendee,
     BookingStatus,
     CancelledBy,
     EventType,
@@ -177,6 +178,69 @@ def get_booking_by_id(
     ).scalars().one_or_none()
 
 
+def add_attendees_to_booking(
+    db: Session,
+    booking_id: str,
+    organization_id: str,
+    emails: list[str],
+) -> tuple["Booking", list[str]]:
+    """Adiciona participantes (e-mails) à reserva. Retorna (booking, lista de emails efetivamente adicionados)."""
+    booking = get_booking_by_id(db, booking_id, organization_id)
+    if not booking:
+        raise HTTPException(
+            status_code=404,
+            detail="Reserva nao encontrada.",
+        )
+    if booking.status == BookingStatus.cancelled:
+        raise HTTPException(
+            status_code=400,
+            detail="Nao e possivel adicionar participantes a uma reserva cancelada.",
+        )
+    existing_emails = {a.email.lower() for a in (booking.attendees or [])}
+    existing_emails.add((booking.guest_email or "").lower())
+    added: list[str] = []
+    for email in emails:
+        if email.lower() in existing_emails:
+            continue
+        name = email.split("@")[0] if email else ""
+        db.add(
+            BookingAttendee(
+                booking_id=booking.id,
+                name=name,
+                email=email.strip(),
+                is_optional=False,
+            )
+        )
+        existing_emails.add(email.lower())
+        added.append(email.strip())
+    db.commit()
+    db.refresh(booking)
+    return booking, added
+
+
+REPORT_REASON_LABELS = {
+    "spam": "Spam ou reserva indesejada",
+    "unknown_person": "Não conheço esta pessoa",
+    "other": "Outro",
+}
+
+
+def report_booking(
+    db: Session,
+    booking_id: str,
+    organization_id: str,
+    reason: str,
+    description: str | None = None,
+) -> Booking:
+    """Reporta a reserva como suspeita e a cancela automaticamente."""
+    label = REPORT_REASON_LABELS.get(reason, reason)
+    parts = [f"Reportado: {label}."]
+    if description and description.strip():
+        parts.append(f" Descrição: {description.strip()}")
+    cancellation_reason = " ".join(parts)
+    return cancel_booking_by_host(db, booking_id, organization_id, reason=cancellation_reason)
+
+
 def cancel_booking_by_host(
     db: Session, booking_id: str, organization_id: str, reason: str | None = None
 ) -> Booking:
@@ -233,6 +297,100 @@ def reschedule_booking_by_host(
     return booking
 
 
+def reschedule_booking_by_token(
+    db: Session,
+    uid: str,
+    cancel_token: str,
+    new_start_time: datetime,
+    timezone: str,
+) -> Booking:
+    """Reagenda booking pelo guest usando UID e cancel_token. Atualiza a mesma reserva."""
+    from src.services.availability_engine import AvailabilityEngine
+
+    booking = get_booking_by_uid(db, uid)
+    if not booking:
+        raise HTTPException(
+            status_code=404,
+            detail="Reserva nao encontrada.",
+        )
+    if booking.cancel_token != cancel_token:
+        raise HTTPException(
+            status_code=403,
+            detail="Token de reagendamento invalido.",
+        )
+    if booking.status == BookingStatus.cancelled:
+        raise HTTPException(
+            status_code=400,
+            detail="Nao e possivel reagendar reserva cancelada.",
+        )
+
+    tz = ZoneInfo(timezone)
+    start = new_start_time
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=tz)
+    slot_start_utc = start.astimezone(ZoneInfo("UTC"))
+    slot_end_utc = slot_start_utc + timedelta(minutes=booking.duration_minutes)
+
+    event_type = db.execute(
+        select(EventType).where(EventType.id == booking.event_type_id)
+    ).scalars().one_or_none()
+    if not event_type:
+        raise HTTPException(
+            status_code=404,
+            detail="Tipo de evento nao encontrado.",
+        )
+
+    engine = AvailabilityEngine(db)
+    start_date = slot_start_utc.date()
+    slots_data = engine.get_available_slots(
+        event_type_id=event_type.id,
+        date_from=start_date,
+        date_to=start_date,
+        requester_timezone=timezone,
+    )
+    tz_requester = ZoneInfo(timezone)
+    slot_time_str = slot_start_utc.astimezone(tz_requester).strftime("%H:%M")
+    found = False
+    for day in slots_data:
+        if day["date"] == start_date.isoformat():
+            for s in day.get("slots", []):
+                if s.get("time") == slot_time_str:
+                    found = True
+                    break
+            break
+    if not found:
+        raise SlotConflictError("Horario indisponivel. Selecione outro.")
+
+    if event_type.user_id is not None:
+        host_condition = Booking.host_user_id == event_type.user_id
+    else:
+        host_condition = (
+            Booking.host_agent_config_id == event_type.agent_config_id
+        )
+
+    conflict = db.execute(
+        select(Booking).where(
+            Booking.organization_id == booking.organization_id,
+            host_condition,
+            Booking.start_time < slot_end_utc,
+            Booking.end_time > slot_start_utc,
+            Booking.status.in_([BookingStatus.confirmed, BookingStatus.pending]),
+            Booking.id != booking.id,
+        )
+    ).first()
+    if conflict is not None:
+        raise SlotConflictError("Horario indisponivel. Selecione outro.")
+
+    old_start = booking.start_time
+    booking.rescheduled_from = old_start
+    booking.start_time = slot_start_utc
+    booking.end_time = slot_end_utc
+    db.commit()
+    db.refresh(booking)
+    logger.info("Booking reagendado pelo guest: %s", booking.id)
+    return booking
+
+
 def cancel_booking_by_token(
     db: Session, uid: str, cancel_token: str, reason: str | None = None
 ) -> Booking:
@@ -260,4 +418,37 @@ def cancel_booking_by_token(
     db.commit()
     db.refresh(booking)
     logger.info("Booking cancelado pelo guest: %s", booking.id)
+    return booking
+
+
+def mark_booking_no_show(
+    db: Session, booking_id: str, organization_id: str
+) -> Booking:
+    """Marca a reserva como não compareceu. Só permitido após o horário de fim do evento."""
+    booking = get_booking_by_id(db, booking_id, organization_id)
+    if not booking:
+        raise HTTPException(
+            status_code=404,
+            detail="Reserva nao encontrada.",
+        )
+    if booking.status == BookingStatus.cancelled:
+        raise HTTPException(
+            status_code=400,
+            detail="Reserva cancelada nao pode ser marcada como nao compareceu.",
+        )
+    if booking.status == BookingStatus.no_show:
+        raise HTTPException(
+            status_code=400,
+            detail="Reserva ja foi marcada como nao compareceu.",
+        )
+    now_utc = datetime.now(ZoneInfo("UTC"))
+    if booking.end_time and booking.end_time > now_utc:
+        raise HTTPException(
+            status_code=400,
+            detail="So e possivel marcar como nao compareceu apos o horario de fim da reuniao.",
+        )
+    booking.status = BookingStatus.no_show
+    db.commit()
+    db.refresh(booking)
+    logger.info("Booking marcado como no-show: %s", booking.id)
     return booking

@@ -26,10 +26,10 @@ export default function InsightsPage() {
 
   if (error) {
     return (
-      <div className="space-y-6">
+      <main className="space-y-6" role="main" aria-label="Insights">
         <h1 className="text-2xl font-semibold">Insights</h1>
-        <p className="text-destructive text-sm">Erro ao carregar insights.</p>
-      </div>
+        <p className="text-destructive text-sm" role="alert">Erro ao carregar insights.</p>
+      </main>
     );
   }
 
@@ -41,13 +41,13 @@ export default function InsightsPage() {
   const topHours = insights?.topHours ?? [];
 
   return (
-    <div className="space-y-6">
-      <div>
+    <main className="space-y-6" role="main" aria-label="Insights do calendário">
+      <header>
         <h1 className="text-2xl font-semibold">Insights</h1>
         <p className="text-muted-foreground text-sm">
           Métricas e gráficos dos últimos 90 dias.
         </p>
-      </div>
+      </header>
 
       {isLoading ? (
         <Skeleton className="h-64 w-full" />
@@ -169,6 +169,6 @@ export default function InsightsPage() {
           </Card>
         </>
       ) : null}
-    </div>
+    </main>
   );
 }

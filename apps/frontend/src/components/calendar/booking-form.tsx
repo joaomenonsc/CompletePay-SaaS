@@ -58,7 +58,12 @@ export function BookingForm({
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+      <form
+        onSubmit={form.handleSubmit(onSubmit)}
+        className="space-y-4"
+        aria-label="Formulário de confirmação de agendamento"
+        noValidate
+      >
         <FormField
           control={form.control}
           name="guestName"
@@ -118,6 +123,8 @@ export function BookingForm({
             isDark && "bg-white text-zinc-900 hover:bg-zinc-200"
           )}
           disabled={isSubmitting}
+          aria-busy={isSubmitting}
+          aria-disabled={isSubmitting}
         >
           {isSubmitting ? "Agendando..." : submitLabel}
         </Button>

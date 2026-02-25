@@ -387,6 +387,53 @@ class BookingCancelHost(BaseModel):
     reason: Optional[str] = Field(None, max_length=1000)
 
 
+class RequestRescheduleBookingRequest(BaseModel):
+    """Motivo opcional ao solicitar reagendamento ao convidado."""
+    reason: Optional[str] = Field(None, max_length=1000)
+
+
+class ReportBookingRequest(BaseModel):
+    """Motivo e descrição opcional ao reportar uma reserva como suspeita."""
+    reason: str = Field(
+        ...,
+        pattern="^(spam|unknown_person|other)$",
+        description="spam=Spam ou reserva indesejada, unknown_person=Não conheço esta pessoa, other=Outro",
+    )
+    description: Optional[str] = Field(None, max_length=2000)
+
+
+class AddBookingAttendeesRequest(BaseModel):
+    """E-mails dos participantes adicionais a incluir na reserva."""
+    emails: list[str] = Field(..., min_length=1, max_length=50)
+
+    @field_validator("emails")
+    @classmethod
+    def validate_emails(cls, v: list[str]) -> list[str]:
+        import re
+        pattern = re.compile(r"^[\w\.\+\-]+@[\w\-]+\.[\w\.\-]+$")
+        out = []
+        for email in v:
+            e = (email or "").strip()
+            if not e:
+                continue
+            if not pattern.match(e):
+                raise ValueError(f"E-mail invalido: {e}")
+            out.append(e)
+        if not out:
+            raise ValueError("Informe ao menos um e-mail valido.")
+        return out
+
+
+class BookingAttendeeResponse(BaseModel):
+    id: str
+    booking_id: str
+    name: str
+    email: str
+    is_optional: bool
+
+    model_config = {"from_attributes": True}
+
+
 class BookingRescheduleHost(BaseModel):
     new_start_time: datetime
     timezone: str = Field(default="America/Sao_Paulo", max_length=50)
@@ -409,6 +456,8 @@ class BookingResponse(BaseModel):
     cancellation_reason: Optional[str] = None
     cancelled_by: Optional[str] = None
     meeting_url: Optional[str] = None
+    rescheduled_from: Optional[str] = None
+    attendees: list[BookingAttendeeResponse] = []
     createdAt: str
     updatedAt: str
 
@@ -416,6 +465,7 @@ class BookingResponse(BaseModel):
 
     @classmethod
     def from_orm_row(cls, row) -> "BookingResponse":
+        attendees = getattr(row, "attendees", None) or []
         return cls(
             id=row.id,
             uid=row.uid,
@@ -443,6 +493,11 @@ class BookingResponse(BaseModel):
                 else None
             ),
             meeting_url=row.meeting_url,
+            rescheduled_from=(
+                row.rescheduled_from.isoformat()
+                if getattr(row, "rescheduled_from", None) else None
+            ),
+            attendees=[BookingAttendeeResponse.model_validate(a) for a in attendees],
             createdAt=(
                 row.created_at.isoformat() if row.created_at else ""
             ),
@@ -615,6 +670,8 @@ class WebhookCreate(BaseModel):
             "booking.created",
             "booking.cancelled",
             "booking.rescheduled",
+            "booking.no_show",
+            "booking.attendees_added",
         }
         for e in v:
             if e not in valid:
