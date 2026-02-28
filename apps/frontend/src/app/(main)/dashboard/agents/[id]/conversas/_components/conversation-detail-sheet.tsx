@@ -1,72 +1,38 @@
 "use client";
 
-import { Download } from "lucide-react";
+import { Download, Hash, MessageSquare, Clock, Star, Coins } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 
 import type { ConversationRow } from "./columns";
 
-interface ConversationDetailSheetProps {
-  conversation: ConversationRow;
-  onClose: () => void;
-  onExportCsv: () => void;
-  /** Conteúdo do Sheet (SheetContent) para poder usar dentro do Sheet existente */
-  children?: never;
-}
+// ─── Status config ────────────────────────────────────────────────────────────
 
-export function ConversationDetailSheet({ conversation, onExportCsv }: ConversationDetailSheetProps) {
-  const { id, data, timeRange, canal, canalLabel, status, csat, tokens, custoEst, messages } = conversation;
+const STATUS_COLORS: Record<string, string> = {
+  Resolvida: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800",
+  Ativa: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800",
+  Escalada: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800",
+  Expirada: "bg-muted text-muted-foreground border-border",
+};
 
-  const subtitle = timeRange ? `${data} ${timeRange}` : data;
-  const canalDisplay = canalLabel ?? canal;
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
+function InfoRow({ label, value, icon: Icon }: { label: string; value: string; icon?: React.ElementType }) {
   return (
-    <>
-      <header className="flex flex-col gap-1 border-b px-4 pt-2 pb-4">
-        <h2 className="font-semibold text-foreground">Conversa #{id}</h2>
-        <p className="text-muted-foreground text-sm">{subtitle}</p>
-      </header>
-
-      <div className="grid gap-1 px-4 py-2 text-sm">
-        <MetaRow label="Canal" value={canalDisplay} />
-        <MetaRow label="Status" value={status} />
-        <MetaRow label="CSAT" value={csat} />
-        {tokens != null && <MetaRow label="Tokens" value={formatTokens(tokens)} />}
-        {custoEst != null && <MetaRow label="Custo est." value={custoEst} />}
-      </div>
-
-      <hr className="border-border" />
-
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
-          {messages.map((m, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: messages have no stable id from API
-            <MessageBubble key={i} message={m} />
-          ))}
+    <div className="flex items-start gap-3">
+      {Icon && (
+        <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
+          <Icon className="size-4 text-muted-foreground" />
         </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-muted-foreground">{label}</p>
+        <p className="mt-0.5 text-sm font-medium leading-snug">{value}</p>
       </div>
-
-      <footer className="border-t p-4">
-        <Button variant="outline" size="sm" onClick={onExportCsv}>
-          <Download className="size-4" />
-          Exportar CSV
-        </Button>
-      </footer>
-    </>
-  );
-}
-
-function MetaRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex gap-2">
-      <span className="shrink-0 text-muted-foreground">{label}:</span>
-      <span className="text-foreground">{value}</span>
     </div>
   );
-}
-
-function formatTokens(n: number) {
-  return n.toLocaleString("pt-BR");
 }
 
 function MessageBubble({
@@ -92,5 +58,92 @@ function MessageBubble({
       </div>
       {message.time ? <span className="shrink-0 text-muted-foreground text-xs">{message.time}</span> : null}
     </div>
+  );
+}
+
+// ─── Props ────────────────────────────────────────────────────────────────────
+
+interface ConversationDetailSheetProps {
+  conversation: ConversationRow;
+  onClose: () => void;
+  onExportCsv: () => void;
+  children?: never;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export function ConversationDetailSheet({ conversation, onExportCsv }: ConversationDetailSheetProps) {
+  const { id, data, timeRange, canal, canalLabel, status, csat, tokens, custoEst, msgs, duracao, messages } = conversation;
+
+  const subtitle = timeRange ? `${data} ${timeRange}` : data;
+  const canalDisplay = canalLabel ?? canal;
+  const initials = `#${id}`;
+
+  return (
+    <>
+      {/* ── Header ── */}
+      <div className="relative flex items-start gap-4 border-b bg-muted/30 px-6 py-5">
+        {/* Avatar */}
+        <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-semibold">
+          {initials}
+        </div>
+
+        <div className="min-w-0 flex-1 pr-6">
+          <h2 className="truncate text-base font-semibold leading-tight">
+            Conversa #{id}
+          </h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {subtitle}
+          </p>
+          <Badge
+            variant="outline"
+            className={`mt-2 text-xs ${STATUS_COLORS[status] ?? ""}`}
+          >
+            {status}
+          </Badge>
+        </div>
+      </div>
+
+      {/* ── Body ── */}
+      <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="space-y-5">
+          {/* Info section */}
+          <section className="space-y-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Informações
+            </h3>
+            <InfoRow icon={Hash} label="Canal" value={canalDisplay} />
+            <InfoRow icon={Star} label="CSAT" value={csat} />
+            {tokens != null && <InfoRow icon={Coins} label="Tokens" value={tokens.toLocaleString("pt-BR")} />}
+            {custoEst != null && <InfoRow icon={Coins} label="Custo est." value={custoEst} />}
+            {duracao && <InfoRow icon={Clock} label="Duração" value={duracao} />}
+            <InfoRow icon={MessageSquare} label="Mensagens" value={String(msgs)} />
+          </section>
+
+          <Separator />
+
+          {/* Messages section */}
+          <section className="space-y-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Histórico de mensagens
+            </h3>
+            <div className="space-y-4">
+              {messages.map((m, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: messages have no stable id from API
+                <MessageBubble key={i} message={m} />
+              ))}
+            </div>
+          </section>
+        </div>
+      </div>
+
+      {/* ── Footer ── */}
+      <div className="border-t bg-background px-6 py-4">
+        <Button variant="outline" size="sm" onClick={onExportCsv}>
+          <Download className="mr-2 size-4" />
+          Exportar CSV
+        </Button>
+      </div>
+    </>
   );
 }

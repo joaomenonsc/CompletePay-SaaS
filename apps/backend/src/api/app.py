@@ -19,6 +19,9 @@ from src.api.routes.calendar import router as calendar_router
 from src.api.routes.calendar_public import router as calendar_public_router
 from src.api.routes.auth import router as auth_router
 from src.api.routes.chat import router as chat_router
+from src.api.routes.crm import router as crm_router
+from src.api.routes.crm_marketing import router as email_marketing_router
+from src.api.routes.emk_public import router as emk_public_router
 from src.api.routes.health import router as health_router
 from src.api.routes.ws_chat import router as ws_chat_router
 from src.api.routes.organizations import router as organizations_router
@@ -44,6 +47,8 @@ app = FastAPI(
 
 # CORS: permite requisicoes do frontend. Em producao use apenas dominio(s) do frontend (Fase 3.3).
 origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+if not origins and settings.app_env != "production":
+    origins = ["http://localhost:3000", "http://localhost:3003"]
 if settings.app_env == "production" and origins:
     for o in origins:
         if "localhost" in o or o == "*":
@@ -69,6 +74,9 @@ app.include_router(organizations_router)
 app.include_router(agents_router)
 app.include_router(calendar_router)
 app.include_router(calendar_public_router)
+app.include_router(crm_router)
+app.include_router(email_marketing_router)
+app.include_router(emk_public_router)
 app.include_router(chat_router)
 app.include_router(ws_chat_router)
 

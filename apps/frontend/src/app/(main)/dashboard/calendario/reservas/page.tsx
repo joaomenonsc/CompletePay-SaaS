@@ -4,7 +4,7 @@ import { useMemo, useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { CalendarDays, ChevronDown, Filter, MoreHorizontal } from "lucide-react";
+import { CalendarDays, ChevronDown, Filter, List, MoreHorizontal } from "lucide-react";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -24,6 +24,7 @@ import { useOrganizationStore } from "@/store/organization-store";
 import { useCurrentOrg } from "@/app/(main)/dashboard/settings/_hooks/use-current-org";
 import type { Booking } from "@/types/calendar";
 import { BookingDetailSheet } from "./_components/booking-detail-sheet";
+import { CalendarView } from "./_components/calendar-view";
 import {
   BookingsFilter,
   defaultFilterState,
@@ -114,6 +115,7 @@ export default function ReservasPage() {
   const [activeFilterKeys, setActiveFilterKeys] = useState<FilterKey[]>([]);
   const [popoverOpenKey, setPopoverOpenKey] = useState<FilterKey | null>(null);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
 
   const currentOrganizationId = useOrganizationStore((s) => s.currentOrganizationId);
   const { orgSlug } = useCurrentOrg();
@@ -166,11 +168,47 @@ export default function ReservasPage() {
 
   return (
     <main className="space-y-6" role="main" aria-label="Reservas">
-      <header>
-        <h1 className="text-2xl font-semibold">Reservas</h1>
-        <p className="text-muted-foreground text-sm">
-          Lista de agendamentos realizados.
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Reservas</h1>
+          <p className="text-muted-foreground text-sm">
+            {viewMode === "list"
+              ? "Lista de agendamentos realizados."
+              : "Visão de calendário dos agendamentos."}
+          </p>
+        </div>
+
+        {/* Lista / Calendário toggle */}
+        <div
+          className="flex rounded-md border bg-muted/40 p-0.5 gap-0.5 shrink-0"
+          role="group"
+          aria-label="Modo de visualização"
+        >
+          <button
+            type="button"
+            onClick={() => setViewMode("list")}
+            aria-pressed={viewMode === "list"}
+            className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors ${viewMode === "list"
+                ? "bg-background shadow-sm text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+              }`}
+          >
+            <List className="size-4" aria-hidden />
+            Lista
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("calendar")}
+            aria-pressed={viewMode === "calendar"}
+            className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors ${viewMode === "calendar"
+                ? "bg-background shadow-sm text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+              }`}
+          >
+            <CalendarDays className="size-4" aria-hidden />
+            Calendário
+          </button>
+        </div>
       </header>
 
       {error && (
@@ -228,88 +266,44 @@ export default function ReservasPage() {
         />
       </div>
 
-      {isLoading ? (
-        <Skeleton className="h-48 w-full" />
-      ) : filteredBookings.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle id="reservas-list-title" className="flex items-center gap-2">
-              <CalendarDays className="size-5" aria-hidden />
-              {TAB_LABELS[tab].title}
-            </CardTitle>
-            <CardDescription id="reservas-list-desc">
-              {TAB_LABELS[tab].description}
-              {activeFilterKeys.length > 0 && " (com filtros aplicados)"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ul
-              className="divide-y"
-              aria-labelledby="reservas-list-title"
-              aria-describedby="reservas-list-desc"
-              aria-label={`${filteredBookings.length} reserva(s)`}
-            >
-              {filteredBookings.map((b) => {
-                const dateTimeStr = b.startTime
-                  ? format(new Date(b.startTime), "dd/MM/yyyy HH:mm", { locale: ptBR })
-                  : "Data não definida";
-                const statusText =
-                  b.rescheduledFrom
-                    ? "Reagendado"
-                    : b.status === "confirmed"
-                      ? "Confirmado"
-                      : b.status === "pending"
-                        ? "Pendente"
-                        : b.status === "cancelled"
-                          ? "Cancelado"
-                          : b.status === "no_show"
-                            ? "Não compareceu"
-                            : b.status === "completed"
-                              ? "Concluído"
-                              : b.status;
-                return (
-                <li
-                  key={b.id}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Reserva de ${b.guestName}, ${dateTimeStr}, ${statusText}. Pressione Enter ou Espaço para ver detalhes`}
-                  onClick={() => setSelectedBooking(b)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setSelectedBooking(b);
-                    }
-                  }}
-                  className="hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-ring flex cursor-pointer items-center justify-between rounded-lg px-3 py-3 transition-colors first:pt-3 focus-visible:outline focus-visible:outline-2"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium">{b.guestName}</p>
-                    <p className="text-muted-foreground text-sm">{b.guestEmail}</p>
-                    <p className="text-muted-foreground mt-1 text-xs">
-                      {b.startTime
-                        ? format(new Date(b.startTime), "dd/MM/yyyy HH:mm", {
-                            locale: ptBR,
-                          })
-                        : "-"}
-                    </p>
-                  </div>
-                  <Badge
-                    variant={
-                      b.rescheduledFrom
-                        ? "secondary"
-                        : b.status === "confirmed"
-                          ? "default"
-                          : b.status === "cancelled"
-                            ? "destructive"
-                            : "secondary"
-                    }
-                    className={
-                      b.rescheduledFrom
-                        ? "border-orange-500 bg-orange-500 text-white hover:bg-orange-600"
-                        : undefined
-                    }
-                  >
-                    {b.rescheduledFrom
+      {/* ── Calendar view ── */}
+      {viewMode === "calendar" && (
+        <CalendarView
+          bookings={filteredBookings}
+          eventTypes={eventTypes}
+          onBookingClick={setSelectedBooking}
+        />
+      )}
+
+      {/* ── List view ── */}
+      {viewMode === "list" && (
+        isLoading ? (
+          <Skeleton className="h-48 w-full" />
+        ) : filteredBookings.length > 0 ? (
+          <Card>
+            <CardHeader>
+              <CardTitle id="reservas-list-title" className="flex items-center gap-2">
+                <CalendarDays className="size-5" aria-hidden />
+                {TAB_LABELS[tab].title}
+              </CardTitle>
+              <CardDescription id="reservas-list-desc">
+                {TAB_LABELS[tab].description}
+                {activeFilterKeys.length > 0 && " (com filtros aplicados)"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ul
+                className="divide-y"
+                aria-labelledby="reservas-list-title"
+                aria-describedby="reservas-list-desc"
+                aria-label={`${filteredBookings.length} reserva(s)`}
+              >
+                {filteredBookings.map((b) => {
+                  const dateTimeStr = b.startTime
+                    ? format(new Date(b.startTime), "dd/MM/yyyy HH:mm", { locale: ptBR })
+                    : "Data não definida";
+                  const statusText =
+                    b.rescheduledFrom
                       ? "Reagendado"
                       : b.status === "confirmed"
                         ? "Confirmado"
@@ -321,25 +315,79 @@ export default function ReservasPage() {
                               ? "Não compareceu"
                               : b.status === "completed"
                                 ? "Concluído"
-                                : b.status}
-                  </Badge>
-                </li>
-              );
-              })}
-            </ul>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card aria-live="polite" aria-atomic="true">
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <CalendarDays className="text-muted-foreground mb-4 size-12" aria-hidden />
-            <p className="text-muted-foreground text-sm">
-              {bookings.length === 0
-                ? "Nenhuma reserva ainda."
-                : "Nenhuma reserva encontrada para esta aba e filtros."}
-            </p>
-          </CardContent>
-        </Card>
+                                : b.status;
+                  return (
+                    <li
+                      key={b.id}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Reserva de ${b.guestName}, ${dateTimeStr}, ${statusText}. Pressione Enter ou Espaço para ver detalhes`}
+                      onClick={() => setSelectedBooking(b)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedBooking(b);
+                        }
+                      }}
+                      className="hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-ring flex cursor-pointer items-center justify-between rounded-lg px-3 py-3 transition-colors first:pt-3 focus-visible:outline focus-visible:outline-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium">{b.guestName}</p>
+                        <p className="text-muted-foreground text-sm">{b.guestEmail}</p>
+                        <p className="text-muted-foreground mt-1 text-xs">
+                          {b.startTime
+                            ? format(new Date(b.startTime), "dd/MM/yyyy HH:mm", { locale: ptBR })
+                            : "-"}
+                        </p>
+                      </div>
+                      <Badge
+                        variant={
+                          b.rescheduledFrom
+                            ? "secondary"
+                            : b.status === "confirmed"
+                              ? "default"
+                              : b.status === "cancelled"
+                                ? "destructive"
+                                : "secondary"
+                        }
+                        className={
+                          b.rescheduledFrom
+                            ? "border-orange-500 bg-orange-500 text-white hover:bg-orange-600"
+                            : undefined
+                        }
+                      >
+                        {b.rescheduledFrom
+                          ? "Reagendado"
+                          : b.status === "confirmed"
+                            ? "Confirmado"
+                            : b.status === "pending"
+                              ? "Pendente"
+                              : b.status === "cancelled"
+                                ? "Cancelado"
+                                : b.status === "no_show"
+                                  ? "Não compareceu"
+                                  : b.status === "completed"
+                                    ? "Concluído"
+                                    : b.status}
+                      </Badge>
+                    </li>
+                  );
+                })}
+              </ul>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card aria-live="polite" aria-atomic="true">
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <CalendarDays className="text-muted-foreground mb-4 size-12" aria-hidden />
+              <p className="text-muted-foreground text-sm">
+                {bookings.length === 0
+                  ? "Nenhuma reserva ainda."
+                  : "Nenhuma reserva encontrada para esta aba e filtros."}
+              </p>
+            </CardContent>
+          </Card>
+        )
       )}
 
       <BookingDetailSheet

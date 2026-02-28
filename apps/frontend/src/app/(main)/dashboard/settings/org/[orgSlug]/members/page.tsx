@@ -50,7 +50,9 @@ import { useOrgSlug } from "../_hooks/use-org-slug";
 import {
   type OrgMember,
   fetchOrgMembers,
+  getOrgRoleLabel,
   inviteOrgMember,
+  ORG_ROLES,
   removeOrgMember,
   updateOrgMemberRole,
 } from "@/lib/api/organizations";
@@ -85,7 +87,10 @@ export default function OrgMembersPage() {
   );
 
   const currentUserId = me?.user_id ?? "";
-  const isOwner = org?.role === "owner";
+  const orgRole = (org?.role ?? "").toLowerCase();
+  const isOwner = orgRole === "owner";
+  /** Proprietário ou gestor clínico podem convidar, alterar função e remover membros. */
+  const isOrgAdmin = orgRole === "owner" || orgRole === "gcl";
 
   const handleInvite = async () => {
     if (!org?.id || !inviteEmail.trim()) return;
@@ -172,7 +177,7 @@ export default function OrgMembersPage() {
             onChange={(e) => setSearch(e.target.value)}
             className="h-9 max-w-[240px]"
           />
-          {isOwner && (
+          {isOrgAdmin && (
             <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
               <DialogTrigger asChild>
                 <Button size="sm">
@@ -204,8 +209,11 @@ export default function OrgMembersPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="owner">Proprietário</SelectItem>
-                        <SelectItem value="member">Membro</SelectItem>
+                        {ORG_ROLES.map((r) => (
+                          <SelectItem key={r} value={r}>
+                            {getOrgRoleLabel(r)}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -263,22 +271,25 @@ export default function OrgMembersPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      {isOwner && member.userId !== currentUserId ? (
+                      {isOrgAdmin && member.userId !== currentUserId ? (
                         <Select
                           value={member.role}
                           onValueChange={(v) => handleRoleChange(member, v)}
                         >
-                          <SelectTrigger className="h-8 w-[130px]">
+                          <SelectTrigger className="h-8 w-[180px]">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="owner">Proprietário</SelectItem>
-                            <SelectItem value="member">Membro</SelectItem>
+                            {ORG_ROLES.map((r) => (
+                              <SelectItem key={r} value={r}>
+                                {getOrgRoleLabel(r)}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       ) : (
                         <Badge variant={member.role === "owner" ? "default" : "secondary"}>
-                          {member.role === "owner" ? "Proprietário" : "Membro"}
+                          {getOrgRoleLabel(member.role)}
                         </Badge>
                       )}
                     </TableCell>
@@ -292,7 +303,7 @@ export default function OrgMembersPage() {
                         >
                           Sair
                         </Button>
-                      ) : isOwner ? (
+                      ) : isOrgAdmin ? (
                         <Button
                           variant="ghost"
                           size="sm"

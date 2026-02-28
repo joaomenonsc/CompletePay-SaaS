@@ -6,14 +6,18 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
   AlertTriangle,
+  CalendarClock,
   Clock,
   Flag,
   Info,
+  Loader2,
   MapPin,
   MoreHorizontal,
   Send,
+  User,
   UserPlus,
   UserX,
+  Users,
   Video,
   VideoIcon,
   X,
@@ -49,14 +53,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetHeader,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Separator } from "@/components/ui/separator";
 import {
   addBookingAttendees,
   cancelBookingHost,
@@ -67,7 +67,8 @@ import {
 import type { Booking } from "@/types/calendar";
 import type { EventType, EventTypeLocation } from "@/types/calendar";
 
-/** Rótulo do local para exibição (ex.: "Cal Video", "Pessoalmente (endereço do organizador)"). */
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function getLocationLabel(loc: EventTypeLocation | undefined): string {
   if (!loc) return "Cal Video";
   switch (loc.location_type) {
@@ -84,7 +85,6 @@ function getLocationLabel(loc: EventTypeLocation | undefined): string {
   }
 }
 
-/** Valor único para o select de local (video | video_google_meet | in_person | custom_link | phone). */
 const LOCATION_OPTIONS: { group: string; value: string; label: string }[] = [
   { group: "Conferência", value: "video", label: "Cal Video (Padrão)" },
   { group: "Conferência", value: "video_google_meet", label: "Google Meet" },
@@ -109,26 +109,55 @@ const REPORT_REASONS = [
   { value: "other", label: "Outro" },
 ] as const;
 
+const STATUS_LABELS: Record<string, string> = {
+  confirmed: "Confirmado",
+  pending: "Pendente",
+  cancelled: "Cancelado",
+  no_show: "Não compareceu",
+  completed: "Concluído",
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  confirmed: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800",
+  pending: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800",
+  cancelled: "bg-destructive/10 text-destructive border-destructive/20",
+  no_show: "bg-destructive/10 text-destructive border-destructive/20",
+  completed: "bg-muted text-muted-foreground border-border",
+};
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function InfoRow({ label, value, icon: Icon, children }: { label: string; value?: string; icon?: React.ElementType; children?: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-3">
+      {Icon && (
+        <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted">
+          <Icon className="size-4 text-muted-foreground" />
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-muted-foreground">{label}</p>
+        {value && <p className="mt-0.5 text-sm font-medium leading-snug">{value}</p>}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── Props ────────────────────────────────────────────────────────────────────
+
 interface BookingDetailSheetProps {
   booking: Booking | null;
   eventTypes: EventType[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Slug da organização (para link de reagendamento). */
   orgSlug: string;
-  /** E-mail de quem está reagendando (ex.: usuário logado). */
   rescheduledByEmail: string;
-  /** Chamado após adicionar participantes (recebe a reserva atualizada). */
   onAttendeesAdded?: (booking: Booking) => void;
-  /** Chamado quando a reserva é atualizada (ex.: marcada como não compareceu). */
   onBookingUpdated?: (booking: Booking) => void;
 }
 
-function getEventTitle(booking: Booking, eventTypes: EventType[]): string {
-  const et = eventTypes.find((e) => e.id === booking.eventTypeId);
-  if (et) return et.title;
-  return `Reunião de ${booking.durationMinutes} min`;
-}
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export function BookingDetailSheet({
   booking,
@@ -163,56 +192,58 @@ export function BookingDetailSheet({
 
   const start = booking?.startTime ? new Date(booking.startTime) : null;
   const end = booking?.endTime ? new Date(booking.endTime) : null;
-  const eventTitle = booking ? getEventTitle(booking, eventTypes) : "";
+  const eventTitle = booking
+    ? eventTypes.find((e) => e.id === booking.eventTypeId)?.title ?? `Reunião de ${booking.durationMinutes} min`
+    : "";
   const dateStr = start
-    ? format(start, "EEE, d MMM", { locale: ptBR })
-    : "-";
+    ? format(start, "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR })
+    : "—";
   const timeStr =
     start && end
-      ? `${format(start, "HH:mm", { locale: ptBR })} - ${format(end, "HH:mm", { locale: ptBR })}`
-      : "-";
+      ? `${format(start, "HH:mm")} – ${format(end, "HH:mm")} (${booking?.durationMinutes ?? 0} min)`
+      : "—";
 
   const rescheduledFromStart = booking?.rescheduledFrom
     ? new Date(booking.rescheduledFrom)
     : null;
-  const rescheduledFromEnd = rescheduledFromStart
-    ? new Date(
-        rescheduledFromStart.getTime() + (booking?.durationMinutes ?? 0) * 60 * 1000
-      )
-    : null;
-  const oldDateStr =
-    rescheduledFromStart &&
-    format(rescheduledFromStart, "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR });
-  const oldTimeStr =
-    rescheduledFromStart &&
-    rescheduledFromEnd &&
-    `${format(rescheduledFromStart, "h:mma", { locale: ptBR })} - ${format(rescheduledFromEnd, "h:mma", { locale: ptBR })}`;
-  const newDateStr =
-    start && format(start, "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR });
-  const newTimeStr =
-    start &&
-    end &&
-    `${format(start, "h:mma", { locale: ptBR })} - ${format(end, "h:mma", { locale: ptBR })}`;
-  const timezoneLabel =
-    booking?.timezone === "America/Sao_Paulo"
-      ? "Horário Padrão de Brasília"
-      : booking?.timezone?.replace(/_/g, " ") ?? "";
 
-  const statusLabel = !booking
-    ? ""
-    : booking.rescheduledFrom
-      ? "Reagendado"
-      : booking.status === "confirmed"
-        ? "Confirmado"
-        : booking.status === "pending"
-          ? "Pendente"
-          : booking.status === "cancelled"
-            ? "Cancelado"
-            : booking.status === "no_show"
-              ? "Não compareceu"
-              : booking.status === "completed"
-                ? "Concluído"
-                : booking.status;
+  const statusKey = booking?.rescheduledFrom ? "rescheduled" : (booking?.status ?? "");
+  const statusLabel = booking?.rescheduledFrom
+    ? "Reagendado"
+    : STATUS_LABELS[booking?.status ?? ""] ?? booking?.status ?? "";
+  const statusColor = booking?.rescheduledFrom
+    ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-200 dark:border-orange-800"
+    : STATUS_COLORS[booking?.status ?? ""] ?? "";
+
+  const guestName = booking?.guestName ?? "Convidado";
+  const initials = guestName
+    .split(" ")
+    .slice(0, 2)
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase();
+
+  const isTerminal = booking?.status === "cancelled" || booking?.status === "no_show" || booking?.status === "completed";
+
+  const locationLabel = booking
+    ? getLocationLabel(eventTypes.find((e) => e.id === booking.eventTypeId)?.locations?.[0])
+    : "—";
+
+  function handleReagendarReserva() {
+    if (!booking || !orgSlug) return;
+    const eventType = eventTypes.find((e) => e.id === booking.eventTypeId);
+    const eventSlug = eventType?.slug;
+    const userSlug = eventType?.userId ?? booking.hostUserId;
+    if (!eventSlug || !userSlug) return;
+    const params = new URLSearchParams({
+      rescheduleUid: booking.uid,
+      rescheduledBy: rescheduledByEmail || "",
+      overlayCalendar: "true",
+    });
+    const href = `/calendario/${encodeURIComponent(orgSlug)}/${encodeURIComponent(userSlug)}/${encodeURIComponent(eventSlug)}?${params.toString()}`;
+    onOpenChange(false);
+    router.push(href);
+  }
 
   function handleOpenRequestReschedule() {
     setRequestRescheduleReason("");
@@ -239,295 +270,289 @@ export function BookingDetailSheet({
     }
   }
 
-  function handleReagendarReserva() {
-    if (!booking || !orgSlug) return;
-    const eventType = eventTypes.find((e) => e.id === booking.eventTypeId);
-    const eventSlug = eventType?.slug;
-    const userSlug = eventType?.userId ?? booking.hostUserId;
-    if (!eventSlug || !userSlug) return;
-    const params = new URLSearchParams({
-      rescheduleUid: booking.uid,
-      rescheduledBy: rescheduledByEmail || "",
-      overlayCalendar: "true",
-    });
-    const href = `/calendario/${encodeURIComponent(orgSlug)}/${encodeURIComponent(userSlug)}/${encodeURIComponent(eventSlug)}?${params.toString()}`;
-    onOpenChange(false);
-    router.push(href);
-  }
-
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        side="right"
-        showCloseButton={false}
-        title="Detalhes da reserva"
-        className="flex w-full flex-col sm:max-w-md"
-        aria-describedby={booking ? "booking-detail-sheet-desc" : undefined}
-        role="dialog"
-        aria-modal="true"
-      >
+      <SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-md" aria-label="Detalhes da reserva">
         {booking && (
           <>
-            <SheetHeader className="flex flex-row items-start justify-between gap-3 border-b pb-4 pr-1">
-              <div className="min-w-0 flex-1 space-y-1">
-                <h2 className="text-lg font-semibold">Detalhes da reserva</h2>
-                <p id="booking-detail-sheet-desc" className="sr-only">
-                  {dateStr}. Status: {statusLabel}. Use o menu de opções para reagendar, solicitar reagendamento ou cancelar.
-                </p>
-                <p className="text-muted-foreground text-sm">{dateStr}</p>
+            {/* ── Header ── */}
+            <div className="relative flex items-start gap-4 border-b bg-muted/30 px-6 py-5">
+              {/* Avatar */}
+              <div className="flex size-12 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-semibold">
+                {initials}
               </div>
-              <div className="flex shrink-0 items-center gap-1">
+
+              <div className="min-w-0 flex-1 pr-6">
+                <h2 className="truncate text-base font-semibold leading-tight">
+                  {guestName}
+                </h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {eventTitle}
+                </p>
                 <Badge
-                  variant={
-                    booking.rescheduledFrom
-                      ? "secondary"
-                      : booking.status === "confirmed"
-                        ? "default"
-                        : booking.status === "cancelled"
-                          ? "destructive"
-                          : booking.status === "no_show"
-                            ? "secondary"
-                            : "secondary"
-                  }
-                  className={
-                    booking.rescheduledFrom
-                      ? "border-orange-500 bg-orange-500 text-white hover:bg-orange-600"
-                      : undefined
-                  }
+                  variant="outline"
+                  className={`mt-2 text-xs ${statusColor}`}
                 >
                   {statusLabel}
                 </Badge>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-8 shrink-0"
-                      aria-haspopup="true"
-                      aria-expanded={undefined}
-                      aria-label="Abrir menu de opções da reserva"
-                    >
-                      <MoreHorizontal className="size-4" aria-hidden />
-                      <span className="sr-only">Opções</span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56">
-                    <DropdownMenuLabel className="font-semibold">
-                      Editar evento
-                    </DropdownMenuLabel>
-                    <DropdownMenuItem onSelect={handleReagendarReserva}>
-                      <Clock className="mr-2 size-4" />
-                      Reagendar reserva
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={handleOpenRequestReschedule}>
-                      <Send className="mr-2 size-4" />
-                      Solicitar reagendamento
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        if (booking) {
-                          setSelectedLocationValue(getCurrentLocationValue(booking, eventTypes));
-                          setEditLocationOpen(true);
-                        }
-                      }}
-                    >
-                      <MapPin className="mr-2 size-4" />
-                      Editar Localização
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        setEmailFields([""]);
-                        setAddParticipantsOpen(true);
-                      }}
-                    >
-                      <UserPlus className="mr-2 size-4" />
-                      Participantes Adicionais
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuLabel className="font-semibold">
-                      Após o evento
-                    </DropdownMenuLabel>
-                    <DropdownMenuItem
-                      disabled={!hasEventPassed}
-                      className={!hasEventPassed ? "opacity-50" : undefined}
-                      onSelect={() =>
-                        hasEventPassed &&
-                        toast.info("Gravações estarão disponíveis em breve.")
-                      }
-                    >
-                      <VideoIcon className="mr-2 size-4" />
-                      Ver gravações
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      disabled={!hasEventPassed}
-                      className={!hasEventPassed ? "opacity-50" : undefined}
-                      onSelect={() =>
-                        hasEventPassed &&
-                        toast.info("Detalhes da sessão em breve.")
-                      }
-                    >
-                      <Info className="mr-2 size-4" />
-                      Ver detalhes da sessão
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      disabled={
-                        !hasEventPassed ||
-                        booking.status === "no_show" ||
-                        booking.status === "cancelled" ||
-                        isMarkingNoShow
-                      }
-                      className={
-                        !hasEventPassed ? "opacity-50" : undefined
-                      }
-                      onSelect={async () => {
-                        if (!hasEventPassed || !booking || booking.status === "no_show" || booking.status === "cancelled") return;
-                        setIsMarkingNoShow(true);
-                        try {
-                          const updated = await markBookingNoShow(booking.id);
-                          toast.success("Reserva marcada como não compareceu.");
-                          onBookingUpdated?.(updated);
-                        } catch {
-                          toast.error(
-                            "Não foi possível marcar como não compareceu."
-                          );
-                        } finally {
-                          setIsMarkingNoShow(false);
-                        }
-                      }}
-                    >
-                      <UserX className="mr-2 size-4" />
-                      {isMarkingNoShow
-                        ? "Marcando..."
-                        : "Marcar como não compareceu"}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      variant="destructive"
-                      disabled={booking.status === "cancelled"}
-                      onSelect={() => {
-                        if (booking.status === "cancelled") return;
-                        setReportReason("spam");
-                        setReportDescription("");
-                        setReportOpen(true);
-                      }}
-                    >
-                      <Flag className="mr-2 size-4" />
-                      Reportar agendamento
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      variant="destructive"
-                      disabled={booking.status === "cancelled"}
-                      onSelect={() => {
-                        if (booking.status === "cancelled") return;
-                        setCancelReason("");
-                        setCancelEventOpen(true);
-                      }}
-                    >
-                      <XCircle className="mr-2 size-4" />
-                      Cancelar este evento
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <SheetClose asChild>
+              </div>
+
+              {/* Options dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="size-8 shrink-0"
-                    aria-label="Fechar painel"
+                    className="absolute right-12 top-5 size-8 shrink-0"
+                    aria-label="Opções da reserva"
                   >
-                    <X className="size-4" />
+                    <MoreHorizontal className="size-4" />
                   </Button>
-                </SheetClose>
-              </div>
-            </SheetHeader>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel className="font-semibold">
+                    Editar evento
+                  </DropdownMenuLabel>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      if (booking) {
+                        setSelectedLocationValue(getCurrentLocationValue(booking, eventTypes));
+                        setEditLocationOpen(true);
+                      }
+                    }}
+                  >
+                    <MapPin className="mr-2 size-4" />
+                    Editar Localização
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      setEmailFields([""]);
+                      setAddParticipantsOpen(true);
+                    }}
+                  >
+                    <UserPlus className="mr-2 size-4" />
+                    Participantes Adicionais
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="font-semibold">
+                    Após o evento
+                  </DropdownMenuLabel>
+                  <DropdownMenuItem
+                    disabled={!hasEventPassed}
+                    className={!hasEventPassed ? "opacity-50" : undefined}
+                    onSelect={() =>
+                      hasEventPassed &&
+                      toast.info("Gravações estarão disponíveis em breve.")
+                    }
+                  >
+                    <VideoIcon className="mr-2 size-4" />
+                    Ver gravações
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={!hasEventPassed}
+                    className={!hasEventPassed ? "opacity-50" : undefined}
+                    onSelect={() =>
+                      hasEventPassed &&
+                      toast.info("Detalhes da sessão em breve.")
+                    }
+                  >
+                    <Info className="mr-2 size-4" />
+                    Ver detalhes da sessão
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={
+                      !hasEventPassed ||
+                      booking.status === "no_show" ||
+                      booking.status === "cancelled" ||
+                      isMarkingNoShow
+                    }
+                    className={
+                      !hasEventPassed ? "opacity-50" : undefined
+                    }
+                    onSelect={async () => {
+                      if (!hasEventPassed || !booking || booking.status === "no_show" || booking.status === "cancelled") return;
+                      setIsMarkingNoShow(true);
+                      try {
+                        const updated = await markBookingNoShow(booking.id);
+                        toast.success("Reserva marcada como não compareceu.");
+                        onBookingUpdated?.(updated);
+                      } catch {
+                        toast.error(
+                          "Não foi possível marcar como não compareceu."
+                        );
+                      } finally {
+                        setIsMarkingNoShow(false);
+                      }
+                    }}
+                  >
+                    <UserX className="mr-2 size-4" />
+                    {isMarkingNoShow
+                      ? "Marcando..."
+                      : "Marcar como não compareceu"}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    disabled={booking.status === "cancelled"}
+                    onSelect={() => {
+                      if (booking.status === "cancelled") return;
+                      setReportReason("spam");
+                      setReportDescription("");
+                      setReportOpen(true);
+                    }}
+                  >
+                    <Flag className="mr-2 size-4" />
+                    Reportar agendamento
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
 
-            <div className="flex flex-1 flex-col gap-6 overflow-auto p-4">
-              <div>
-                <p className="text-muted-foreground mb-2 text-xs uppercase tracking-wide">
-                  {booking.rescheduledFrom ? "Quando" : "Data e horário"}
-                </p>
-                {booking.rescheduledFrom && oldDateStr && oldTimeStr ? (
-                  <div className="space-y-2">
-                    <p className="text-muted-foreground line-through text-sm capitalize">
-                      {oldDateStr}
-                    </p>
-                    <p className="text-muted-foreground line-through text-sm">
-                      {oldTimeStr}
-                      {timezoneLabel && ` (${timezoneLabel})`}
-                    </p>
-                    <p className="font-medium text-sm capitalize">
-                      {newDateStr}
-                    </p>
-                    <p className="font-medium text-sm">
-                      {newTimeStr}
-                      {timezoneLabel && ` (${timezoneLabel})`}
-                    </p>
+            {/* ── Body ── */}
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <div className="space-y-5">
+                {/* Date & time section */}
+                <section className="space-y-3">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Data e horário
+                  </h3>
+                  {rescheduledFromStart ? (
+                    <InfoRow icon={CalendarClock} label="Reagendado de">
+                      <p className="mt-0.5 text-sm text-muted-foreground line-through">
+                        {format(rescheduledFromStart, "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                      </p>
+                      <p className="mt-0.5 text-sm font-medium leading-snug">{dateStr}</p>
+                    </InfoRow>
+                  ) : (
+                    <InfoRow icon={CalendarClock} label="Data" value={dateStr} />
+                  )}
+                  <InfoRow icon={Clock} label="Horário" value={timeStr} />
+                </section>
+
+                <Separator />
+
+                {/* Participants section */}
+                <section className="space-y-3">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Participantes
+                  </h3>
+                  <InfoRow icon={User} label="Convidado" value={`${guestName} (${booking.guestEmail})`} />
+                  <InfoRow icon={Users} label="Organizador" value="Você" />
+                  {booking.attendees && booking.attendees.length > 0 && (
+                    <InfoRow icon={UserPlus} label="Participantes adicionais">
+                      <div className="mt-0.5 space-y-0.5">
+                        {booking.attendees.map((a) => (
+                          <p key={a.id} className="text-sm font-medium">{a.email}</p>
+                        ))}
+                      </div>
+                    </InfoRow>
+                  )}
+                </section>
+
+                <Separator />
+
+                {/* Other info */}
+                <section className="space-y-3">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Outras informações
+                  </h3>
+                  <div className="rounded-lg border bg-muted/30 px-4 py-3 space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Evento</span>
+                      <span className="font-medium">{eventTitle}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Local</span>
+                      <span className="font-medium">{locationLabel}</span>
+                    </div>
+                    {booking.guestNotes && (
+                      <div className="pt-1 border-t text-sm">
+                        <span className="text-muted-foreground">Notas</span>
+                        <p className="mt-1 font-medium italic">&ldquo;{booking.guestNotes}&rdquo;</p>
+                      </div>
+                    )}
                   </div>
-                ) : (
+                </section>
+
+                {/* Meeting link */}
+                {booking.meetingUrl && (
                   <>
-                    <p className="font-medium">{dateStr}</p>
-                    <p className="text-muted-foreground text-sm">{timeStr}</p>
+                    <Separator />
+                    <section className="space-y-3">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        Chamada
+                      </h3>
+                      <a
+                        href={booking.meetingUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary hover:underline inline-flex items-center gap-2 text-sm font-medium"
+                      >
+                        <Video className="size-4" />
+                        Junte-se à chamada
+                      </a>
+                    </section>
+                  </>
+                )}
+
+                {/* Terminal status */}
+                {isTerminal && (
+                  <>
+                    <Separator />
+                    <div className={`flex items-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium ${statusColor}`}>
+                      <XCircle className="size-4" />
+                      {statusLabel}
+                    </div>
                   </>
                 )}
               </div>
+            </div>
 
-              <div>
-                <p className="text-muted-foreground mb-1 text-xs uppercase tracking-wide">
-                  Evento
-                </p>
-                <p className="font-medium">
-                  {eventTitle} entre Você e {booking.guestName}
-                </p>
-              </div>
-
-              {booking.guestNotes && (
-                <div>
-                  <p className="text-muted-foreground mb-1 text-xs uppercase tracking-wide">
-                    Notas
-                  </p>
-                  <p className="text-muted-foreground text-sm italic">
-                    &ldquo;{booking.guestNotes}&rdquo;
-                  </p>
+            {/* ── Footer: actions ── */}
+            {!isTerminal && (
+              <div className="border-t bg-background px-6 py-4 space-y-2">
+                {/* Primary actions */}
+                <div className="flex gap-2">
+                  <Button
+                    className="flex-1"
+                    onClick={handleReagendarReserva}
+                  >
+                    <Clock className="mr-2 size-4" />
+                    Reagendar
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={handleOpenRequestReschedule}
+                  >
+                    <Send className="mr-2 size-4" />
+                    Solicitar reagendamento
+                  </Button>
                 </div>
-              )}
 
-              <div>
-                <p className="text-muted-foreground mb-1 text-xs uppercase tracking-wide">
-                  Participantes
-                </p>
-                <p className="text-sm">Você e {booking.guestName}</p>
-                <p className="text-muted-foreground text-sm">{booking.guestEmail}</p>
-                {booking.attendees && booking.attendees.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    <p className="text-muted-foreground text-xs">Participantes adicionais:</p>
-                    {booking.attendees.map((a) => (
-                      <p key={a.id} className="text-muted-foreground text-sm">{a.email}</p>
-                    ))}
-                  </div>
+                {/* Danger action */}
+                {booking.status !== "cancelled" && (
+                  <Button
+                    variant="ghost"
+                    className="w-full text-destructive hover:bg-destructive/5 hover:text-destructive"
+                    onClick={() => {
+                      setCancelReason("");
+                      setCancelEventOpen(true);
+                    }}
+                  >
+                    <XCircle className="mr-2 size-4" />
+                    Cancelar este evento
+                  </Button>
                 )}
               </div>
-
-              {booking.meetingUrl && (
-                <div>
-                  <p className="text-muted-foreground mb-2 text-xs uppercase tracking-wide">
-                    Chamada
-                  </p>
-                  <a
-                    href={booking.meetingUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary hover:underline inline-flex items-center gap-2 text-sm font-medium"
-                  >
-                    <Video className="size-4" />
-                    Junte-se à chamada
-                  </a>
-                </div>
-              )}
-            </div>
+            )}
           </>
         )}
       </SheetContent>
 
+      {/* ── Dialogs ── */}
+
+      {/* Request reschedule */}
       <Dialog open={requestRescheduleOpen} onOpenChange={setRequestRescheduleOpen}>
         <DialogContent showCloseButton={true} className="sm:max-w-md">
           <DialogHeader>
@@ -577,6 +602,7 @@ export function BookingDetailSheet({
         </DialogContent>
       </Dialog>
 
+      {/* Edit location */}
       <Dialog open={editLocationOpen} onOpenChange={setEditLocationOpen}>
         <DialogContent showCloseButton={true} className="sm:max-w-md">
           <DialogHeader>
@@ -641,8 +667,8 @@ export function BookingDetailSheet({
               type="button"
               onClick={() => {
                 toast.success("Localização atualizada.");
-setEditLocationOpen(false);
-            }}
+                setEditLocationOpen(false);
+              }}
             >
               Atualizar
             </Button>
@@ -650,6 +676,7 @@ setEditLocationOpen(false);
         </DialogContent>
       </Dialog>
 
+      {/* Add participants */}
       <Dialog open={addParticipantsOpen} onOpenChange={setAddParticipantsOpen}>
         <DialogContent showCloseButton={true} className="sm:max-w-md">
           <DialogHeader>
@@ -747,6 +774,7 @@ setEditLocationOpen(false);
         </DialogContent>
       </Dialog>
 
+      {/* Report */}
       <Dialog open={reportOpen} onOpenChange={setReportOpen}>
         <DialogContent showCloseButton={true} className="sm:max-w-md">
           <DialogHeader>
@@ -836,6 +864,7 @@ setEditLocationOpen(false);
         </DialogContent>
       </Dialog>
 
+      {/* Cancel event */}
       <Dialog open={cancelEventOpen} onOpenChange={setCancelEventOpen}>
         <DialogContent showCloseButton={true} className="sm:max-w-md">
           <DialogHeader>

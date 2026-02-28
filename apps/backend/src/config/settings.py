@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     frontend_url: str = Field(
         default="http://localhost:3003", validation_alias="FRONTEND_URL"
     )
+    # Email Marketing — ESP adapter settings
+    resend_domain: str = Field(default="", validation_alias="RESEND_DOMAIN")
+    marketing_batch_size: int = Field(
+        default=50, validation_alias="MARKETING_BATCH_SIZE"
+    )
+    marketing_rate_limit_per_second: float = Field(
+        default=8.0, validation_alias="MARKETING_RATE_LIMIT_PER_SECOND"
+    )
     # Vercel Blob (upload de avatares em producao; sem token usa filesystem local)
     blob_read_write_token: str = Field(
         default="", validation_alias="BLOB_READ_WRITE_TOKEN"

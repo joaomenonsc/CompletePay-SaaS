@@ -3,10 +3,15 @@ import {
   Building2,
   Calendar,
   CircleUser,
+  ClipboardList,
   Clock,
   CreditCard,
+  DollarSign,
+  FileText,
   Fingerprint,
+  Globe,
   GraduationCap,
+  HeartPulse,
   Kanban,
   LayoutDashboard,
   Link2,
@@ -15,9 +20,11 @@ import {
   Mail,
   MessageSquare,
   ReceiptText,
+  Send,
   Settings,
   SquareArrowUpRight,
   Users,
+  UserCog,
 } from "lucide-react";
 
 export interface NavSubItem {
@@ -87,11 +94,35 @@ export const sidebarItems: NavGroup[] = [
     label: "Pages",
     items: [
       {
-        title: "Email",
-        url: "/dashboard/coming-soon",
-        icon: Mail,
-        comingSoon: true,
+        title: "CRM Saúde",
+        url: "/dashboard/crm-saude",
+        icon: HeartPulse,
+        isNew: true,
+        subItems: [
+          { title: "Dashboard", url: "/dashboard/crm-saude", icon: LayoutDashboard },
+          { title: "Pacientes", url: "/dashboard/crm-saude/pacientes", icon: Users },
+          { title: "Profissionais", url: "/dashboard/crm-saude/profissionais", icon: UserCog },
+          { title: "Unidades", url: "/dashboard/crm-saude/unidades", icon: Building2 },
+          { title: "Agendamentos", url: "/dashboard/crm-saude/agendamentos", icon: Calendar },
+          { title: "Lista de espera", url: "/dashboard/crm-saude/lista-espera", icon: Clock },
+          { title: "Atendimentos", url: "/dashboard/crm-saude/atendimentos", icon: ClipboardList },
+          { title: "Financeiro", url: "/dashboard/crm-saude/financeiro", icon: DollarSign },
+        ],
       },
+      {
+        title: "Email Marketing",
+        url: "/dashboard/email-marketing",
+        icon: Mail,
+        isNew: true,
+        subItems: [
+          { title: "Dashboard", url: "/dashboard/email-marketing", icon: LayoutDashboard },
+          { title: "Campanhas", url: "/dashboard/email-marketing/campanhas", icon: Send },
+          { title: "Templates", url: "/dashboard/email-marketing/templates", icon: FileText },
+          { title: "Listas", url: "/dashboard/email-marketing/listas", icon: Users },
+          { title: "Domínios", url: "/dashboard/email-marketing/dominios", icon: Globe },
+        ],
+      },
+
       {
         title: "Calendário",
         url: "/dashboard/calendario",

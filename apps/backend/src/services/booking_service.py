@@ -159,6 +159,111 @@ def create_booking(db: Session, data: BookingCreatePublic) -> Booking:
     return booking
 
 
+def create_booking_from_crm(
+    db: Session,
+    *,
+    event_type_id: str,
+    organization_id: str,
+    guest_name: str,
+    guest_email: str,
+    start_time: datetime,
+    timezone: str = "America/Sao_Paulo",
+    guest_notes: str | None = None,
+    duration_minutes: int | None = None,
+) -> Booking:
+    """
+    Cria booking a partir do CRM (por event_type_id). Double-check de slot.
+    Levanta HTTPException 404 se EventType nao existir; SlotConflictError se slot indisponivel.
+    """
+    from src.services.availability_engine import AvailabilityEngine
+
+    event_type = db.execute(
+        select(EventType).where(
+            EventType.id == event_type_id,
+            EventType.organization_id == organization_id,
+            EventType.is_active.is_(True),
+        )
+    ).scalars().one_or_none()
+    if not event_type:
+        raise HTTPException(
+            status_code=404,
+            detail="Tipo de evento nao encontrado ou inativo.",
+        )
+
+    tz = ZoneInfo(timezone)
+    if start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=tz)
+    slot_start_utc = start_time.astimezone(ZoneInfo("UTC"))
+    duration = duration_minutes or event_type.duration_minutes
+    slot_end_utc = slot_start_utc + timedelta(minutes=duration)
+
+    engine = AvailabilityEngine(db)
+    start_date = slot_start_utc.date()
+    slots_data = engine.get_available_slots(
+        event_type_id=event_type.id,
+        date_from=start_date,
+        date_to=start_date,
+        requester_timezone=timezone,
+    )
+    slot_time_str = slot_start_utc.astimezone(tz).strftime("%H:%M")
+    found = False
+    for day in slots_data:
+        if day["date"] == start_date.isoformat():
+            for s in day.get("slots", []):
+                if s.get("time") == slot_time_str:
+                    found = True
+                    break
+            break
+    if not found:
+        raise SlotConflictError("Horario indisponivel. Selecione outro.")
+
+    status = (
+        BookingStatus.pending
+        if event_type.requires_confirmation
+        else BookingStatus.confirmed
+    )
+    booking = Booking(
+        organization_id=event_type.organization_id,
+        event_type_id=event_type.id,
+        host_user_id=event_type.user_id,
+        host_agent_config_id=event_type.agent_config_id,
+        guest_name=guest_name,
+        guest_email=guest_email,
+        guest_notes=guest_notes,
+        start_time=slot_start_utc,
+        end_time=slot_end_utc,
+        duration_minutes=duration,
+        timezone=timezone,
+        status=status,
+    )
+    db.add(booking)
+    db.flush()
+
+    host_condition = (
+        Booking.host_user_id == event_type.user_id
+        if event_type.user_id is not None
+        else (Booking.host_agent_config_id == event_type.agent_config_id)
+    )
+    conflict = db.execute(
+        select(Booking).where(
+            Booking.organization_id == organization_id,
+            host_condition,
+            Booking.start_time < slot_end_utc,
+            Booking.end_time > slot_start_utc,
+            Booking.status.in_([BookingStatus.confirmed, BookingStatus.pending]),
+            Booking.id != booking.id,
+        )
+    ).first()
+    if conflict is not None:
+        db.rollback()
+        raise SlotConflictError("Horario indisponivel. Selecione outro.")
+
+    db.commit()
+    db.refresh(booking)
+    logger.info("Booking criado (CRM): %s (event_type=%s)", booking.id, event_type.id)
+    return booking
+
+
 def get_booking_by_uid(db: Session, uid: str) -> Booking | None:
     """Retorna booking pelo UID publico ou None."""
     return db.execute(

@@ -326,7 +326,7 @@ export default function AgentConversasPage() {
 
           {/* Sheet detalhe da conversa (wireframe 7.2) */}
           <Sheet open={!!selected} onOpenChange={(open) => !open && setSelectedId(null)}>
-            <SheetContent side="right" className="flex flex-col gap-0 sm:max-w-lg">
+            <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
               <SheetTitle className="sr-only">
                 {selected ? `Conversa ${selected.id}` : "Detalhe da conversa"}
               </SheetTitle>

@@ -84,7 +84,16 @@ def run_migrate() -> int:
         from src.db.session import Base, engine
         from src.db import models  # noqa: F401 - registra Organization, UserOrganization, AgentConfig
         from src.db import models_calendar  # noqa: F401 - registra tabelas do modulo Calendario
-        Base.metadata.create_all(bind=engine)
+        from src.db import models_crm  # noqa: F401 - registra Patient, PatientConsent, etc.
+        from src.db import models_marketing  # noqa: F401 - registra EmkTemplate, EmkCampaign, etc.
+        try:
+            Base.metadata.create_all(bind=engine)
+        except Exception as e:
+            err_str = str(e).lower()
+            if "already exists" in err_str or "duplicate" in err_str:
+                print("Algumas tabelas ou indices ja existem; continuando.")
+            else:
+                raise
         with psycopg.connect(url, connect_timeout=10) as conn2:
             with conn2.cursor() as cur2:
                 cur2.execute(
@@ -106,6 +115,104 @@ def run_migrate() -> int:
                         END IF;
                     END $$;
                 """)
+                # CRM: novas colunas em crm_health_professionals (Story 3.1 vinculo)
+                cur2.execute(
+                    "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS user_id VARCHAR(36);"
+                )
+                cur2.execute(
+                    "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS employment_type VARCHAR(20);"
+                )
+                cur2.execute(
+                    "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS modality VARCHAR(20);"
+                )
+                # Story 3.2: agenda do profissional
+                cur2.execute("""
+                    ALTER TABLE crm_health_professionals
+                    ADD COLUMN IF NOT EXISTS schedule_id VARCHAR(36)
+                    REFERENCES availability_schedules(id) ON DELETE SET NULL;
+                """)
+                cur2.execute(
+                    "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS default_slot_minutes INTEGER;"
+                )
+                cur2.execute(
+                    "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS accepts_encaixe BOOLEAN NOT NULL DEFAULT FALSE;"
+                )
+                cur2.execute(
+                    "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS buffer_between_minutes INTEGER;"
+                )
+                # Epic 4: event_type_id para agendamento (slots/Booking)
+                cur2.execute("""
+                    ALTER TABLE crm_health_professionals
+                    ADD COLUMN IF NOT EXISTS event_type_id VARCHAR(36)
+                    REFERENCES event_types(id) ON DELETE SET NULL;
+                """)
+                cur2.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_crm_health_professionals_event_type_id ON crm_health_professionals(event_type_id);"
+                )
+                # Story 3.3: Unit config + Room
+                cur2.execute(
+                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS timezone VARCHAR(50);"
+                )
+                cur2.execute(
+                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS default_slot_minutes INTEGER;"
+                )
+                cur2.execute(
+                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS min_advance_minutes INTEGER;"
+                )
+                cur2.execute(
+                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS max_advance_days INTEGER;"
+                )
+                cur2.execute(
+                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS cancellation_policy TEXT;"
+                )
+                cur2.execute(
+                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS specialities JSONB;"
+                )
+                cur2.execute(
+                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS modalities JSONB;"
+                )
+                cur2.execute(
+                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS convenio_ids JSONB;"
+                )
+                # Epic 6: tabela crm_payments (pagamento por atendimento)
+                cur2.execute("""
+                    CREATE TABLE IF NOT EXISTS crm_payments (
+                        id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+                        organization_id VARCHAR(36) NOT NULL
+                            REFERENCES organizations(id) ON DELETE CASCADE,
+                        encounter_id VARCHAR(36) NOT NULL
+                            REFERENCES crm_clinical_encounters(id) ON DELETE CASCADE,
+                        amount NUMERIC(12, 2) NOT NULL,
+                        payment_method VARCHAR(30) NOT NULL DEFAULT 'pix',
+                        notes TEXT,
+                        paid_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        recorded_by VARCHAR(36),
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    );
+                """)
+                cur2.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_crm_payments_organization_id ON crm_payments(organization_id);"
+                )
+                cur2.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_crm_payments_encounter_id ON crm_payments(encounter_id);"
+                )
+                cur2.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_crm_payments_paid_at ON crm_payments(paid_at);"
+                )
+                # Email Marketing: add blocks_json column to emk_templates
+                cur2.execute(
+                    "ALTER TABLE emk_templates ADD COLUMN IF NOT EXISTS blocks_json TEXT;"
+                )
+                # EMK-5: campos de remetente na campanha
+                cur2.execute(
+                    "ALTER TABLE emk_campaigns ADD COLUMN IF NOT EXISTS from_email VARCHAR(255);"
+                )
+                cur2.execute(
+                    "ALTER TABLE emk_campaigns ADD COLUMN IF NOT EXISTS from_name VARCHAR(255);"
+                )
+                cur2.execute(
+                    "ALTER TABLE emk_campaigns ADD COLUMN IF NOT EXISTS reply_to VARCHAR(255);"
+                )
                 conn2.commit()
         print("Tabelas organizations, user_organizations, agent_configs e calendario garantidas.")
 

@@ -169,10 +169,17 @@ def _require_org_member(
 
 
 def _require_owner(role: str) -> None:
-    if not role or (role.strip().lower() != "owner"):
+    """Exige role owner ou gcl (gestor clinico) para acoes administrativas."""
+    if not role:
         raise HTTPException(
             status_code=403,
-            detail="Apenas proprietarios podem executar esta acao.",
+            detail="Apenas proprietarios ou gestores clinicos podem executar esta acao.",
+        )
+    r = role.strip().lower()
+    if r not in ("owner", "gcl"):
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas proprietarios ou gestores clinicos podem executar esta acao.",
         )
 
 

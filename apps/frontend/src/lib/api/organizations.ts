@@ -3,6 +3,36 @@
  */
 
 import apiClient from "@/lib/api/client";
+
+/** Roles da organização: gerais (owner, member) + roles de saúde (CRM). */
+export const ORG_ROLES = [
+  "owner",
+  "member",
+  "rcp",
+  "fin",
+  "enf",
+  "med",
+  "gcl",
+  "mkt",
+] as const;
+
+export type OrgRole = (typeof ORG_ROLES)[number];
+
+/** Labels em português para exibição na UI (convite, tabela de membros). */
+export const ORG_ROLE_LABELS: Record<OrgRole, string> = {
+  owner: "Proprietário",
+  member: "Membro",
+  rcp: "Recepção",
+  fin: "Financeiro",
+  enf: "Enfermagem",
+  med: "Profissional de saúde",
+  gcl: "Gestor clínico",
+  mkt: "Marketing",
+};
+
+export function getOrgRoleLabel(role: string): string {
+  return ORG_ROLE_LABELS[role as OrgRole] ?? role;
+}
 import type { Organization } from "@/store/organization-store";
 
 interface OrgApiItem {

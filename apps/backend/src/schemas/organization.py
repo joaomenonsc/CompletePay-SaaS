@@ -83,14 +83,19 @@ class OrgMemberItem(BaseModel):
     role: str
 
 
+# Roles: owner/member (gerais) + roles de saude (CRM)
+ORG_ROLES = frozenset({"owner", "member", "rcp", "fin", "enf", "med", "gcl", "mkt"})
+ORG_ROLE_PATTERN = r"^(owner|member|rcp|fin|enf|med|gcl|mkt)$"
+
+
 class InviteMemberBody(BaseModel):
     """Payload para convidar/adicionar membro por email."""
 
     email: str = Field(..., min_length=1)
-    role: str = Field("member", pattern=r"^(owner|member)$")
+    role: str = Field("member", pattern=ORG_ROLE_PATTERN)
 
 
 class UpdateMemberRoleBody(BaseModel):
     """Payload para alterar funcao do membro."""
 
-    role: str = Field(..., pattern=r"^(owner|member)$")
+    role: str = Field(..., pattern=ORG_ROLE_PATTERN)

@@ -18,19 +18,19 @@ cp .env.example .env
 # Edite .env: DATABASE_URL, REDIS_URL, GOOGLE_API_KEY, etc.
 ```
 
-2. Suba os servicos (PostgreSQL e Redis) com Docker:
+1. Suba os servicos (PostgreSQL e Redis) com Docker:
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
 ```
 
-3. Rode as migracoes e prepare o banco (tabelas do Agno, schema, pgvector):
+1. Rode as migracoes e prepare o banco (tabelas do Agno, schema, pgvector):
 
 ```bash
 python scripts/migrate_db.py
 ```
 
-4. Popule a base de conhecimento (RAG) com politicas e FAQ:
+1. Popule a base de conhecimento (RAG) com politicas e FAQ:
 
 ```bash
 completepay-agent seed-knowledge
@@ -62,7 +62,7 @@ Modelos disponiveis: `quality`, `speed`, `cost`, `gemini_fast`, `gemini_pro`.
 uvicorn src.api.app:app --host 0.0.0.0 --port 8000
 ```
 
-- Documentacao interativa: http://localhost:8000/docs  
+- Documentacao interativa: <http://localhost:8000/docs>  
 - Health: `GET http://localhost:8000/health`  
 - Chat: `POST http://localhost:8000/chat` com body JSON: `{"message": "Ola", "user_id": "default"}`
 
@@ -82,8 +82,8 @@ Para subir backend, frontend, Postgres e Redis de uma vez:
 docker compose -f docker/docker-compose.full-stack.yml up -d
 ```
 
-- Frontend: http://localhost:3000  
-- Backend API: http://localhost:8000 (docs: http://localhost:8000/docs)
+- Frontend: <http://localhost:3000>  
+- Backend API: <http://localhost:8000> (docs: <http://localhost:8000/docs>)
 
 O frontend (Next.js) é buildado com `NEXT_PUBLIC_API_URL=http://localhost:8000` para o navegador chamar a API. Para outra URL (ex.: produção), use o build-arg `NEXT_PUBLIC_API_URL` no serviço `frontend` do compose.
 

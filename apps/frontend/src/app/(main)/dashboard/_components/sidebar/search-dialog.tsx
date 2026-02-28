@@ -1,7 +1,10 @@
 "use client";
-import * as React from "react";
 
-import { ChartBar, Forklift, Gauge, GraduationCap, LayoutDashboard, Search, ShoppingBag } from "lucide-react";
+import * as React from "react";
+import { useRouter } from "next/navigation";
+
+import { useQuery } from "@tanstack/react-query";
+import { HeartPulse, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -11,34 +14,45 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  CommandSeparator,
 } from "@/components/ui/command";
+import { useDebounce } from "@/hooks/use-debounce";
+import { fetchPatients } from "@/lib/api/crm";
+import type { Patient } from "@/types/crm";
 
-const searchItems = [
-  { group: "Dashboards", icon: LayoutDashboard, label: "Default" },
-  { group: "Dashboards", icon: ChartBar, label: "CRM", disabled: true },
-  { group: "Dashboards", icon: Gauge, label: "Analytics", disabled: true },
-  { group: "Dashboards", icon: ShoppingBag, label: "E-Commerce", disabled: true },
-  { group: "Dashboards", icon: GraduationCap, label: "Academy", disabled: true },
-  { group: "Dashboards", icon: Forklift, label: "Logistics", disabled: true },
-  { group: "Authentication", label: "Login v1" },
-  { group: "Authentication", label: "Login v2" },
-  { group: "Authentication", label: "Register v1" },
-  { group: "Authentication", label: "Register v2" },
-];
+function patientDisplayName(p: Patient): string {
+  return (p.social_name && p.social_name.trim() ? p.social_name : p.full_name) || "Sem nome";
+}
 
 export function SearchDialog() {
   const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const debouncedSearch = useDebounce(search, 300);
+  const router = useRouter();
+
+  const { data: patientResult, isLoading: patientsLoading } = useQuery({
+    queryKey: ["crm-patients-search", debouncedSearch],
+    queryFn: () => fetchPatients({ q: debouncedSearch, limit: 10, offset: 0 }),
+    enabled: open && debouncedSearch.trim().length >= 2,
+  });
+  const patients = patientResult?.items ?? [];
+
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.key === "j" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        setOpen((open) => !open);
+        setOpen((o) => !o);
+        if (!open) setSearch("");
       }
     };
     document.addEventListener("keydown", down);
     return () => document.removeEventListener("keydown", down);
-  }, []);
+  }, [open]);
+
+  const handleSelectPatient = (id: string) => {
+    setOpen(false);
+    setSearch("");
+    router.push(`/dashboard/crm-saude/pacientes/${id}`);
+  };
 
   return (
     <>
@@ -54,24 +68,32 @@ export function SearchDialog() {
         </kbd>
       </Button>
       <CommandDialog open={open} onOpenChange={setOpen}>
-        <CommandInput placeholder="Search dashboards, users, and more…" />
+        <CommandInput
+          placeholder="Buscar pacientes por nome, CPF, telefone ou data…"
+          value={search}
+          onValueChange={setSearch}
+        />
         <CommandList>
-          <CommandEmpty>No results found.</CommandEmpty>
-          {[...new Set(searchItems.map((item) => item.group))].map((group, i) => (
-            <React.Fragment key={group}>
-              {i !== 0 && <CommandSeparator />}
-              <CommandGroup heading={group} key={group}>
-                {searchItems
-                  .filter((item) => item.group === group)
-                  .map((item) => (
-                    <CommandItem className="!py-1.5" key={item.label} onSelect={() => setOpen(false)}>
-                      {item.icon && <item.icon />}
-                      <span>{item.label}</span>
-                    </CommandItem>
-                  ))}
-              </CommandGroup>
-            </React.Fragment>
-          ))}
+          <CommandEmpty>
+            {patientsLoading ? "Buscando…" : "Nenhum paciente encontrado."}
+          </CommandEmpty>
+          {patients.length > 0 && (
+            <CommandGroup heading="Pacientes (CRM Saúde)">
+              {patients.map((p) => (
+                <CommandItem
+                  key={p.id}
+                  className="!py-1.5"
+                  onSelect={() => handleSelectPatient(p.id)}
+                >
+                  <HeartPulse className="mr-2 size-4 text-muted-foreground" />
+                  <span>{patientDisplayName(p)}</span>
+                  {p.phone && (
+                    <span className="ml-2 text-muted-foreground text-xs">{p.phone}</span>
+                  )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
         </CommandList>
       </CommandDialog>
     </>

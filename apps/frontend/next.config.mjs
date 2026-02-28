@@ -18,9 +18,18 @@ const nextConfig = {
   },
 };
 
+// Só tenta upload de source maps quando há token (evita 401 no deploy sem SENTRY_AUTH_TOKEN)
+const hasSentryAuth = Boolean(process.env.SENTRY_AUTH_TOKEN);
+
 export default withSentryConfig(nextConfig, {
   org: process.env.SENTRY_ORG ?? "completepay",
   project: process.env.SENTRY_PROJECT ?? "saas-frontend",
   silent: !process.env.CI,
   widenClientFileUpload: true,
+  sourcemaps: {
+    disable: !hasSentryAuth,
+  },
+  release: {
+    create: hasSentryAuth,
+  },
 });

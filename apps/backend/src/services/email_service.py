@@ -30,31 +30,22 @@ class EmailService:
 
     def __init__(self, db: Session):
         self.db = db
-        self._client = None
+        self._adapter = None
 
-    def _get_client(self):
-        """Lazy init do client Resend."""
-        if self._client is None:
-            try:
-                import resend
+    def _get_adapter(self):
+        """Lazy init do ESP adapter."""
+        if self._adapter is None:
+            from src.services.esp_adapter import get_esp_adapter
 
-                settings = get_settings()
-                if getattr(settings, "resend_api_key", None):
-                    resend.api_key = settings.resend_api_key
-                    self._client = resend
-            except (ImportError, AttributeError) as e:
-                logger.error("Failed to initialize Resend client: %s", e)
-        return self._client
+            self._adapter = get_esp_adapter()
+        return self._adapter
 
     def send_account_confirmation(self, to_email: str, confirm_url: str) -> bool:
         """
         Envia email de confirmacao de conta (auth). Nao grava em EmailLog.
         Retorna True se enviado com sucesso.
         """
-        client = self._get_client()
-        if not client:
-            logger.warning("Email client not configured. Account confirmation to %s not sent.", to_email)
-            return False
+        adapter = self._get_adapter()
         settings = get_settings()
         email_addr = getattr(settings, "email_from_address", None) or "noreply@completepay.com"
         from_name = getattr(settings, "email_from_name", None) or "CompletePay"
@@ -70,18 +61,12 @@ class EmailService:
         <p>Este link expira em 24 horas. Se você não criou esta conta, ignore este email.</p>
         <p>— Equipe CompletePay</p>
         """
-        try:
-            client.Emails.send({
-                "from": from_addr,
-                "to": [to_email],
-                "subject": subject,
-                "html": html,
-            })
+        result = adapter.send_single(from_addr=from_addr, to=to_email, subject=subject, html=html)
+        if result.success:
             logger.info("Account confirmation email sent to %s", to_email)
-            return True
-        except Exception as e:
-            logger.error("Failed to send account confirmation to %s: %s", to_email, e)
-            return False
+        else:
+            logger.error("Failed to send account confirmation to %s: %s", to_email, result.error)
+        return result.success
 
     def send_booking_confirmation_to_guest(
         self, booking: Booking, event_type: EventType, base_url: str = ""
@@ -268,7 +253,7 @@ class EmailService:
         booking_id: str,
         template_type: str,
     ) -> None:
-        """Envia email e registra log."""
+        """Envia email via ESP adapter e registra log."""
         log = EmailLog(
             booking_id=str(booking_id),
             template_type=template_type,
@@ -279,14 +264,7 @@ class EmailService:
         self.db.add(log)
         self.db.flush()
 
-        client = self._get_client()
-        if not client:
-            log.status = "failed"
-            log.error = "Email client not configured"
-            logger.warning("Email client not configured. Email to %s not sent.", to)
-            self.db.commit()
-            return
-
+        adapter = self._get_adapter()
         settings = get_settings()
         email_addr = (
             getattr(settings, "email_from_address", None) or "noreply@completepay.com"
@@ -294,13 +272,10 @@ class EmailService:
         from_name = getattr(settings, "email_from_name", None) or "CompletePay"
         from_addr = f"{from_name} <{email_addr}>"
 
-        try:
-            client.Emails.send({
-                "from": from_addr,
-                "to": [to],
-                "subject": subject,
-                "html": html,
-            })
+        result = adapter.send_single(
+            from_addr=from_addr, to=to, subject=subject, html=html
+        )
+        if result.success:
             log.status = "sent"
             log.sent_at = datetime.now(ZoneInfo("UTC"))
             logger.info(
@@ -309,12 +284,11 @@ class EmailService:
                 to,
                 booking_id,
             )
-        except Exception as e:
+        else:
             log.status = "failed"
-            log.error = str(e)[:500]
-            logger.error("Failed to send email %s to %s: %s", template_type, to, e)
-        finally:
-            self.db.commit()
+            log.error = result.error
+            logger.error("Failed to send email %s to %s: %s", template_type, to, result.error)
+        self.db.commit()
 
     def _render_template(self, template_type: str, context: dict) -> str:
         """Renderiza template HTML simples."""
