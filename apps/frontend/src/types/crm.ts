@@ -401,6 +401,7 @@ export interface ProfessionalUpdateInput {
   accepts_encaixe?: boolean;
   buffer_between_minutes?: number | null;
   event_type_id?: string | null;
+  schedule_id?: string | null;
 }
 
 // ---- Appointments (Epic 4 - Story 4.1) ----
