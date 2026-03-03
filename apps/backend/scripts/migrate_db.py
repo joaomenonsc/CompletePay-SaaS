@@ -86,14 +86,38 @@ def run_migrate() -> int:
         from src.db import models_calendar  # noqa: F401 - registra tabelas do modulo Calendario
         from src.db import models_crm  # noqa: F401 - registra Patient, PatientConsent, etc.
         from src.db import models_marketing  # noqa: F401 - registra EmkTemplate, EmkCampaign, etc.
+        from src.db import models_automations  # noqa: F401 - registra AutomationWorkflow, etc.
+
+        # Cria tabelas uma por uma para evitar que um erro em uma tabela
+        # impeca a criacao das demais (rollback completo do create_all).
         try:
             Base.metadata.create_all(bind=engine)
+            print("Algumas tabelas ou indices ja existem; continuando.")
         except Exception as e:
             err_str = str(e).lower()
             if "already exists" in err_str or "duplicate" in err_str:
-                print("Algumas tabelas ou indices ja existem; continuando.")
+                print("Algumas tabelas ou indices ja existem; criando tabelas individualmente.")
+                # Tenta criar cada tabela separadamente
+                for table in Base.metadata.sorted_tables:
+                    try:
+                        table.create(bind=engine, checkfirst=True)
+                    except Exception as te:
+                        te_str = str(te).lower()
+                        if "already exists" in te_str or "duplicate" in te_str:
+                            pass  # tabela/indice ja existe, ok
+                        else:
+                            print(f"  Aviso ao criar tabela {table.name}: {te}")
             else:
                 raise
+
+        # Helper: verifica se uma tabela existe antes de fazer ALTER
+        def _table_exists(cur, table_name: str) -> bool:
+            cur.execute(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = %s);",
+                (table_name,),
+            )
+            return cur.fetchone()[0]
+
         with psycopg.connect(url, connect_timeout=10) as conn2:
             with conn2.cursor() as cur2:
                 cur2.execute(
@@ -116,64 +140,70 @@ def run_migrate() -> int:
                     END $$;
                 """)
                 # CRM: novas colunas em crm_health_professionals (Story 3.1 vinculo)
-                cur2.execute(
-                    "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS user_id VARCHAR(36);"
-                )
-                cur2.execute(
-                    "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS employment_type VARCHAR(20);"
-                )
-                cur2.execute(
-                    "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS modality VARCHAR(20);"
-                )
-                # Story 3.2: agenda do profissional
-                cur2.execute("""
-                    ALTER TABLE crm_health_professionals
-                    ADD COLUMN IF NOT EXISTS schedule_id VARCHAR(36)
-                    REFERENCES availability_schedules(id) ON DELETE SET NULL;
-                """)
-                cur2.execute(
-                    "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS default_slot_minutes INTEGER;"
-                )
-                cur2.execute(
-                    "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS accepts_encaixe BOOLEAN NOT NULL DEFAULT FALSE;"
-                )
-                cur2.execute(
-                    "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS buffer_between_minutes INTEGER;"
-                )
-                # Epic 4: event_type_id para agendamento (slots/Booking)
-                cur2.execute("""
-                    ALTER TABLE crm_health_professionals
-                    ADD COLUMN IF NOT EXISTS event_type_id VARCHAR(36)
-                    REFERENCES event_types(id) ON DELETE SET NULL;
-                """)
-                cur2.execute(
-                    "CREATE INDEX IF NOT EXISTS ix_crm_health_professionals_event_type_id ON crm_health_professionals(event_type_id);"
-                )
+                if _table_exists(cur2, "crm_health_professionals"):
+                    cur2.execute(
+                        "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS user_id VARCHAR(36);"
+                    )
+                    cur2.execute(
+                        "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS employment_type VARCHAR(20);"
+                    )
+                    cur2.execute(
+                        "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS modality VARCHAR(20);"
+                    )
+                    # Story 3.2: agenda do profissional
+                    cur2.execute("""
+                        ALTER TABLE crm_health_professionals
+                        ADD COLUMN IF NOT EXISTS schedule_id VARCHAR(36)
+                        REFERENCES availability_schedules(id) ON DELETE SET NULL;
+                    """)
+                    cur2.execute(
+                        "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS default_slot_minutes INTEGER;"
+                    )
+                    cur2.execute(
+                        "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS accepts_encaixe BOOLEAN NOT NULL DEFAULT FALSE;"
+                    )
+                    cur2.execute(
+                        "ALTER TABLE crm_health_professionals ADD COLUMN IF NOT EXISTS buffer_between_minutes INTEGER;"
+                    )
+                    # Epic 4: event_type_id para agendamento (slots/Booking)
+                    cur2.execute("""
+                        ALTER TABLE crm_health_professionals
+                        ADD COLUMN IF NOT EXISTS event_type_id VARCHAR(36)
+                        REFERENCES event_types(id) ON DELETE SET NULL;
+                    """)
+                    cur2.execute(
+                        "CREATE INDEX IF NOT EXISTS ix_crm_health_professionals_event_type_id ON crm_health_professionals(event_type_id);"
+                    )
+                else:
+                    print("  Aviso: tabela crm_health_professionals nao encontrada, pulando ALTER.")
                 # Story 3.3: Unit config + Room
-                cur2.execute(
-                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS timezone VARCHAR(50);"
-                )
-                cur2.execute(
-                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS default_slot_minutes INTEGER;"
-                )
-                cur2.execute(
-                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS min_advance_minutes INTEGER;"
-                )
-                cur2.execute(
-                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS max_advance_days INTEGER;"
-                )
-                cur2.execute(
-                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS cancellation_policy TEXT;"
-                )
-                cur2.execute(
-                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS specialities JSONB;"
-                )
-                cur2.execute(
-                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS modalities JSONB;"
-                )
-                cur2.execute(
-                    "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS convenio_ids JSONB;"
-                )
+                if _table_exists(cur2, "crm_units"):
+                    cur2.execute(
+                        "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS timezone VARCHAR(50);"
+                    )
+                    cur2.execute(
+                        "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS default_slot_minutes INTEGER;"
+                    )
+                    cur2.execute(
+                        "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS min_advance_minutes INTEGER;"
+                    )
+                    cur2.execute(
+                        "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS max_advance_days INTEGER;"
+                    )
+                    cur2.execute(
+                        "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS cancellation_policy TEXT;"
+                    )
+                    cur2.execute(
+                        "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS specialities JSONB;"
+                    )
+                    cur2.execute(
+                        "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS modalities JSONB;"
+                    )
+                    cur2.execute(
+                        "ALTER TABLE crm_units ADD COLUMN IF NOT EXISTS convenio_ids JSONB;"
+                    )
+                else:
+                    print("  Aviso: tabela crm_units nao encontrada, pulando ALTER.")
                 # Epic 6: tabela crm_payments (pagamento por atendimento)
                 cur2.execute("""
                     CREATE TABLE IF NOT EXISTS crm_payments (
@@ -200,19 +230,38 @@ def run_migrate() -> int:
                     "CREATE INDEX IF NOT EXISTS ix_crm_payments_paid_at ON crm_payments(paid_at);"
                 )
                 # Email Marketing: add blocks_json column to emk_templates
-                cur2.execute(
-                    "ALTER TABLE emk_templates ADD COLUMN IF NOT EXISTS blocks_json TEXT;"
-                )
+                if _table_exists(cur2, "emk_templates"):
+                    cur2.execute(
+                        "ALTER TABLE emk_templates ADD COLUMN IF NOT EXISTS blocks_json TEXT;"
+                    )
                 # EMK-5: campos de remetente na campanha
-                cur2.execute(
-                    "ALTER TABLE emk_campaigns ADD COLUMN IF NOT EXISTS from_email VARCHAR(255);"
-                )
-                cur2.execute(
-                    "ALTER TABLE emk_campaigns ADD COLUMN IF NOT EXISTS from_name VARCHAR(255);"
-                )
-                cur2.execute(
-                    "ALTER TABLE emk_campaigns ADD COLUMN IF NOT EXISTS reply_to VARCHAR(255);"
-                )
+                if _table_exists(cur2, "emk_campaigns"):
+                    cur2.execute(
+                        "ALTER TABLE emk_campaigns ADD COLUMN IF NOT EXISTS from_email VARCHAR(255);"
+                    )
+                    cur2.execute(
+                        "ALTER TABLE emk_campaigns ADD COLUMN IF NOT EXISTS from_name VARCHAR(255);"
+                    )
+                    cur2.execute(
+                        "ALTER TABLE emk_campaigns ADD COLUMN IF NOT EXISTS reply_to VARCHAR(255);"
+                    )
+                # Automations: FK circular workflow → version
+                if _table_exists(cur2, "automation_workflows"):
+                    cur2.execute("""
+                        DO $$
+                        BEGIN
+                            IF NOT EXISTS (
+                                SELECT 1 FROM information_schema.table_constraints
+                                WHERE table_name = 'automation_workflows'
+                                AND constraint_name = 'fk_automation_wf_current_version'
+                            ) THEN
+                                ALTER TABLE automation_workflows
+                                ADD CONSTRAINT fk_automation_wf_current_version
+                                FOREIGN KEY (current_version_id)
+                                REFERENCES automation_workflow_versions(id) ON DELETE SET NULL;
+                            END IF;
+                        END $$;
+                    """)
                 conn2.commit()
         print("Tabelas organizations, user_organizations, agent_configs e calendario garantidas.")
 

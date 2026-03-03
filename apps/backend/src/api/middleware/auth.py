@@ -34,6 +34,7 @@ PUBLIC_ROUTES = [
     ("GET", "/api/v1/public/calendar"),
     ("POST", "/api/v1/public/calendar"),
     ("GET", "/uploads"),  # avatares e outros arquivos estaticos publicos
+    ("POST", "/api/v1/automations/webhooks/"),  # webhook de automações (autenticação por secret)
 ]
 
 
