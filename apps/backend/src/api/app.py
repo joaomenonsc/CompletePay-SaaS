@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from src.api.middleware.auth import JwtOptionalMiddleware
+from src.api.middleware.correlation_middleware import CorrelationMiddleware
 from src.api.middleware.logging_middleware import LoggingMiddleware
 from src.api.middleware.rate_limit import RateLimitMiddleware
 from src.api.middleware.security_headers import SecurityHeadersMiddleware
@@ -25,10 +26,17 @@ from src.api.routes.emk_public import router as emk_public_router
 from src.api.routes.health import router as health_router
 from src.api.routes.ws_chat import router as ws_chat_router
 from src.api.routes.organizations import router as organizations_router
+from src.api.routes.automations import router as automations_router
+from src.api.routes.automations_webhook import webhook_router as automations_webhook_router
 from src.config.logging_config import setup_logging
+from src.config.sentry_config import init_sentry
 from src.config.settings import get_settings
+from src.config.telemetry import init_telemetry
 
 load_dotenv()
+
+# Sentry: inicializar antes de tudo para capturar erros de startup (Onda 0.2)
+init_sentry()
 
 # Logs estruturados: APP_ENV=production ou LOG_FORMAT=json (Fase 3.2 / 8)
 settings = get_settings()
@@ -62,8 +70,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Ordem: primeiro adicionado = primeiro a executar. Security (HTTPS) e JWT antes do rate limit (Fase 3.3).
+# Ordem: primeiro adicionado = primeiro a executar.
+# CorrelationMiddleware gera o X-Request-ID antes de tudo (Onda 0.3)
+# LoggingMiddleware já inclui o request_id nos logs estruturados
 app.add_middleware(LoggingMiddleware)
+app.add_middleware(CorrelationMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(JwtOptionalMiddleware)
 app.add_middleware(RateLimitMiddleware)
@@ -79,11 +90,30 @@ app.include_router(email_marketing_router)
 app.include_router(emk_public_router)
 app.include_router(chat_router)
 app.include_router(ws_chat_router)
+app.include_router(automations_router)
+app.include_router(automations_webhook_router)
 
 # Servir arquivos de upload (ex.: avatares em /uploads/avatars/...)
 _uploads_dir = Path(__file__).resolve().parent.parent.parent / "uploads"
 _uploads_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
+
+# --- Observabilidade (Onda 3) ---
+
+# OpenTelemetry: tracing distribuído (Onda 3.1)
+try:
+    from src.db.session import _get_engine as _db_engine
+    init_telemetry(app, engine=_db_engine())
+except Exception:
+    # Engine pode falhar se DB não estiver acessível no startup (cold start)
+    init_telemetry(app)
+
+# Prometheus: métricas USE em /metrics (Onda 3.3)
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+except ImportError:
+    logger.debug("prometheus-fastapi-instrumentator não instalado — /metrics desativado.")
 
 
 @app.get("/")

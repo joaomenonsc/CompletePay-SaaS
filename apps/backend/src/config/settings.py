@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     blob_read_write_token: str = Field(
         default="", validation_alias="BLOB_READ_WRITE_TOKEN"
     )
+    # Sentry DSN para captura de erros no backend (Onda 0.2 — Performance)
+    sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
+    # OpenTelemetry OTLP endpoint para tracing distribuído (Onda 3.1)
+    otel_endpoint: str = Field(default="", validation_alias="OTEL_ENDPOINT")
+    # Unleash URL para feature flags (Onda 4.2)
+    unleash_url: str = Field(default="", validation_alias="UNLEASH_URL")
 
 
 def get_settings() -> Settings:

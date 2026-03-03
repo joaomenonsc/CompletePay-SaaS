@@ -4,6 +4,8 @@ import logging
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
+from src.api.middleware.correlation_middleware import get_request_id
+
 logger = logging.getLogger("completepay.api")
 
 
@@ -22,6 +24,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             response.status_code,
             duration_ms,
             extra={
+                "request_id": get_request_id(),
                 "method": request.method,
                 "path": request.url.path,
                 "status_code": response.status_code,

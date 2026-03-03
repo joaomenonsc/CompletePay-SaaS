@@ -13,6 +13,7 @@ O worker processa:
 """
 import logging
 import os
+import time
 from datetime import timedelta
 
 from arq import cron
@@ -39,12 +40,71 @@ async def startup(ctx: dict) -> None:
     """Inicialização do worker — carrega env e prepara DB session."""
     from dotenv import load_dotenv
     load_dotenv()
+    ctx["_job_start_times"] = {}
     logger.info("ARQ Worker starting up...")
 
 
 async def shutdown(ctx: dict) -> None:
     """Encerramento do worker."""
     logger.info("ARQ Worker shutting down...")
+
+
+# --- Job Lifecycle Hooks (Onda 1.3 — Observabilidade) ---
+
+async def on_job_start(ctx: dict) -> None:
+    """Log estruturado no início de cada job."""
+    job_id = ctx.get("job_id", "unknown")
+    ctx.setdefault("_job_start_times", {})[job_id] = time.monotonic()
+    logger.info(
+        "job_start: %s",
+        ctx.get("job_try", 1),
+        extra={
+            "job_id": job_id,
+            "function": str(ctx.get("job_name", "")),
+            "attempt": ctx.get("job_try", 1),
+        },
+    )
+
+
+async def on_job_end(ctx: dict) -> None:
+    """Log estruturado no fim de cada job com duração."""
+    job_id = ctx.get("job_id", "unknown")
+    start = ctx.get("_job_start_times", {}).pop(job_id, None)
+    duration_ms = round((time.monotonic() - start) * 1000, 2) if start else None
+    logger.info(
+        "job_end: %s (%.2fms)",
+        job_id,
+        duration_ms or 0,
+        extra={
+            "job_id": job_id,
+            "function": str(ctx.get("job_name", "")),
+            "duration_ms": duration_ms,
+            "attempt": ctx.get("job_try", 1),
+        },
+    )
+
+
+async def on_job_error(ctx: dict) -> None:
+    """Log de erro + reporte ao Sentry quando um job falha."""
+    job_id = ctx.get("job_id", "unknown")
+    logger.error(
+        "job_error: %s",
+        job_id,
+        extra={
+            "job_id": job_id,
+            "function": str(ctx.get("job_name", "")),
+            "attempt": ctx.get("job_try", 1),
+        },
+    )
+    # Reportar ao Sentry se disponível (Onda 0.2)
+    try:
+        import sentry_sdk
+        sentry_sdk.capture_message(
+            f"ARQ job failed: {ctx.get('job_name', 'unknown')} (id={job_id})",
+            level="error",
+        )
+    except ImportError:
+        pass
 
 
 class WorkerSettings:
@@ -77,6 +137,9 @@ class WorkerSettings:
 
     on_startup = startup
     on_shutdown = shutdown
+    on_job_start = on_job_start
+    on_job_end = on_job_end
+    on_job_error = on_job_error
 
     # Configurações gerais
     max_jobs = 10
@@ -84,3 +147,4 @@ class WorkerSettings:
     keep_result = timedelta(hours=24)
     retry_jobs = True
     max_tries = 3
+    health_check_interval = 30  # heartbeat a cada 30s

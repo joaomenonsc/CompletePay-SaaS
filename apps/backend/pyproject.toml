@@ -34,6 +34,14 @@ dependencies = [
     "vercel-blob>=0.4.0",
     "reportlab>=4.1.0",
     "arq>=0.26.1",
+    "sentry-sdk[fastapi]>=2.0",
+    "opentelemetry-sdk>=1.30",
+    "opentelemetry-instrumentation-fastapi>=0.51b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.51b0",
+    "opentelemetry-instrumentation-redis>=0.51b0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.30",
+    "prometheus-fastapi-instrumentator>=7.0",
+    "UnleashClient>=6.0",
 ]
 
 [project.optional-dependencies]

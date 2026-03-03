@@ -20,8 +20,16 @@ def _get_engine():
     """Cria o engine na primeira uso (lazy)."""
     global _engine
     if _engine is None:
-        url = get_settings().database_url
-        _engine = create_engine(url, pool_pre_ping=True)
+        settings = get_settings()
+        _engine = create_engine(
+            settings.database_url,
+            pool_pre_ping=True,
+            pool_size=20,          # conexões sempre abertas
+            max_overflow=10,       # pico: até 30 total
+            pool_timeout=30,       # espera 30s antes de levantar erro
+            pool_recycle=1800,     # reconecta a cada 30min (evita stale)
+            echo=settings.app_env == "development",
+        )
     return _engine
 
 

@@ -14,5 +14,11 @@ if (dsn) {
     tracesSampleRate: 0.1,
     replaysSessionSampleRate: 0,
     replaysOnErrorSampleRate: 0,
+    integrations: [
+      // Core Web Vitals: captura INP (Interaction to Next Paint) — Onda 3.2
+      Sentry.browserTracingIntegration({
+        enableInp: true,
+      }),
+    ],
   });
 }

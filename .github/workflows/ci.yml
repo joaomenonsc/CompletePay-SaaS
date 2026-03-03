@@ -22,6 +22,30 @@ jobs:
       run:
         working-directory: apps/backend
 
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: agent
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: completepay_agent
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,8 +68,11 @@ jobs:
       - name: Type check (mypy)
         run: mypy src
 
-      - name: Tests (pytest)
-        run: pytest -v
+      - name: Tests + Coverage (pytest)
+        run: pytest -v --cov=src --cov-report=xml --cov-report=term-missing
+        env:
+          DATABASE_URL: postgresql://agent:password@localhost:5432/completepay_agent
+          REDIS_URL: redis://localhost:6379
 
   # --- Frontend: lint, typecheck, test, build ---
   frontend-quality:
@@ -127,3 +154,53 @@ jobs:
           tags: completepay-frontend:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # --- Lighthouse CI: enforce SLOs de performance (Onda 2.2) ---
+  lighthouse:
+    name: Lighthouse CI (performance)
+    runs-on: ubuntu-latest
+    needs: [frontend-quality]
+    defaults:
+      run:
+        working-directory: apps/frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: apps/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          SKIP_ENV_VALIDATION: "true"
+          NEXT_PUBLIC_API_URL: https://api.example.com
+
+      - name: Run Lighthouse CI
+        run: npx @lhci/cli autorun
+
+  # --- Load Test: k6 baseline (apenas na main) (Onda 4.1) ---
+  load-test:
+    name: Load Test (k6)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: [backend-quality]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Run baseline load test
+        run: k6 run tests/load/baseline.js
+        env:
+          BASE_URL: ${{ vars.STAGING_URL || 'http://localhost:8000' }}
+          TOKEN: ${{ secrets.LOAD_TEST_TOKEN }}

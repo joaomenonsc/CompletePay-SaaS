@@ -20,12 +20,19 @@ class StructuredFormatter(logging.Formatter):
     """Formata registros como JSON por linha (uma linha por evento)."""
 
     def format(self, record: logging.LogRecord) -> str:
+        # Importar aqui para evitar circular import no startup
+        from src.api.middleware.correlation_middleware import get_request_id
+
         log_dict = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
         }
+        # Correlation ID: rastrear requests ponta a ponta (Onda 0.3)
+        req_id = get_request_id()
+        if req_id:
+            log_dict["request_id"] = req_id
         if record.exc_info:
             log_dict["exception"] = self.formatException(record.exc_info)
         # Campos extras (ex.: method, path, status no middleware)
