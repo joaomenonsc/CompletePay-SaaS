@@ -1,22 +1,33 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "pip install .",
-  "builds": [
+  "headers": [
     {
-      "src": "src/api/app.py",
-      "use": "@vercel/python"
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization, X-Request-ID"
+        },
+        {
+          "key": "Access-Control-Allow-Credentials",
+          "value": "true"
+        }
+      ]
     }
   ],
-  "routes": [
+  "rewrites": [
     {
-      "src": "/(.*)",
-      "dest": "src/api/app.py",
-      "headers": {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Request-ID",
-        "Access-Control-Allow-Credentials": "true"
-      }
+      "source": "/(.*)",
+      "destination": "/src/app.py"
     }
   ]
 }
