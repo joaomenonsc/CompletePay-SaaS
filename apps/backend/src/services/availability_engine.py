@@ -179,7 +179,7 @@ class AvailabilityEngine:
                 )
             ).scalars().first()
             if schedule is not None:
-                return schedule[0]
+                return schedule
 
         result = self.db.execute(
             select(AvailabilitySchedule).where(
@@ -190,7 +190,7 @@ class AvailabilityEngine:
             )
         ).scalars().first()
         if result is not None:
-            return result[0]
+            return result
 
         # Fallback: usar qualquer schedule da org (ex.: org sem default definido)
         fallback = self.db.execute(
