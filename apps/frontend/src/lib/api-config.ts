@@ -26,6 +26,8 @@ export const API_ENDPOINTS = {
     meSessions: () => `${API_BASE_URL}/auth/me/sessions`,
     meSessionRevoke: (id: string) => `${API_BASE_URL}/auth/me/sessions/${id}`,
     meSessionsRevokeAll: () => `${API_BASE_URL}/auth/me/sessions/revoke-all`,
+    forgotPassword: () => `${API_BASE_URL}/auth/forgot-password`,
+    resetPassword: () => `${API_BASE_URL}/auth/reset-password`,
   },
   agents: () => `${API_BASE_URL}/agents`,
   agent: (id: string) => `${API_BASE_URL}/agents/${id}`,

@@ -131,3 +131,21 @@ export async function revokeAllSessions(): Promise<{ message: string }> {
   );
   return data;
 }
+
+/** Solicita redefinicao de senha. Envia email com link. */
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  const { data } = await axios.post<{ message: string }>(
+    API_ENDPOINTS.auth.forgotPassword(),
+    { email: email.trim().toLowerCase() }
+  );
+  return data;
+}
+
+/** Redefine a senha usando o token recebido por email. */
+export async function resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+  const { data } = await axios.post<{ message: string }>(
+    API_ENDPOINTS.auth.resetPassword(),
+    { token: token.trim(), new_password: newPassword }
+  );
+  return data;
+}

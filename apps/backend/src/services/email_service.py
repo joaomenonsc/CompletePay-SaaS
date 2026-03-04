@@ -3,7 +3,8 @@ Servico de email transacional (calendario e auth).
 MVP: Resend como provider. Fallback: logging de erro.
 """
 import logging
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -40,27 +41,58 @@ class EmailService:
             self._adapter = get_esp_adapter()
         return self._adapter
 
-    def send_account_confirmation(self, to_email: str, confirm_url: str) -> bool:
+    def _load_email_template(self, template_name: str, variables: dict) -> str | None:
+        """
+        Carrega um template HTML de templates/email/ e substitui variaveis {{chave}}.
+        Retorna None se o arquivo nao existir.
+        """
+        template_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "templates", "email", template_name
+        )
+        template_path = os.path.normpath(template_path)
+        try:
+            with open(template_path, "r", encoding="utf-8") as f:
+                html = f.read()
+        except FileNotFoundError:
+            logger.warning("Email template not found: %s", template_path)
+            return None
+        for key, value in variables.items():
+            html = html.replace("{{" + key + "}}", str(value))
+        return html
+
+    def send_account_confirmation(self, to_email: str, confirm_url: str, user_name: str | None = None) -> bool:
         """
         Envia email de confirmacao de conta (auth). Nao grava em EmailLog.
-        Retorna True se enviado com sucesso.
+        Usa o template confirmacao_conta.html. Retorna True se enviado com sucesso.
         """
         adapter = self._get_adapter()
         settings = get_settings()
         email_addr = getattr(settings, "email_from_address", None) or "noreply@completepay.com"
         from_name = getattr(settings, "email_from_name", None) or "CompletePay"
         from_addr = f"{from_name} <{email_addr}>"
-        subject = "Confirme sua conta - CompletePay"
-        html = f"""
-        <h2>Confirme sua conta</h2>
-        <p>Olá,</p>
-        <p>Você criou uma conta no CompletePay. Clique no link abaixo para confirmar seu email e ativar sua conta:</p>
-        <p><a href="{confirm_url}" style="display:inline-block;background:#2563eb;color:white;padding:12px 24px;text-decoration:none;border-radius:6px;">Confirmar conta</a></p>
-        <p>Ou copie e cole no navegador:</p>
-        <p style="word-break:break-all;color:#666;">{confirm_url}</p>
-        <p>Este link expira em 24 horas. Se você não criou esta conta, ignore este email.</p>
-        <p>— Equipe CompletePay</p>
-        """
+        subject = "Confirme seu e-mail - CompletePay"
+
+        display_name = user_name or to_email.split("@")[0]
+        now_str = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%d/%m/%Y às %H:%M")
+
+        html = self._load_email_template("confirmacao_conta.html", {
+            "nome_usuario": display_name,
+            "link_confirmacao": confirm_url,
+            "data_envio": now_str,
+            "d1": "", "d2": "", "d3": "", "d4": "", "d5": "", "d6": "",
+        })
+        if not html:
+            # Fallback inline
+            html = f"""
+            <h2>Confirme sua conta</h2>
+            <p>Olá, {display_name}</p>
+            <p>Você criou uma conta no CompletePay. Clique no link abaixo para confirmar seu email:</p>
+            <p><a href="{confirm_url}" style="display:inline-block;background:#63b3ed;color:#0d0d0d;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;">Confirmar meu e-mail</a></p>
+            <p>Ou copie e cole no navegador:</p>
+            <p style="word-break:break-all;color:#666;">{confirm_url}</p>
+            <p>Este link expira em 24 horas. Se você não criou esta conta, ignore este email.</p>
+            <p>— Equipe CompletePay</p>
+            """
         result = adapter.send_single(from_addr=from_addr, to=to_email, subject=subject, html=html)
         if result.success:
             logger.info("Account confirmation email sent to %s", to_email)
@@ -68,29 +100,159 @@ class EmailService:
             logger.error("Failed to send account confirmation to %s: %s", to_email, result.error)
         return result.success
 
+    def send_welcome_email(self, to_email: str, user_name: str | None = None, user_id: str | None = None) -> bool:
+        """
+        Envia email de boas-vindas apos confirmacao de conta. Nao grava em EmailLog.
+        Usa o template criacao_conta.html. Retorna True se enviado com sucesso.
+        """
+        adapter = self._get_adapter()
+        settings = get_settings()
+        email_addr = getattr(settings, "email_from_address", None) or "noreply@completepay.com"
+        from_name = getattr(settings, "email_from_name", None) or "CompletePay"
+        from_addr = f"{from_name} <{email_addr}>"
+        subject = "Sua conta foi criada - CompletePay"
+
+        display_name = user_name or to_email.split("@")[0]
+        frontend_url = settings.frontend_url.rstrip("/")
+        now_str = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%d/%m/%Y às %H:%M")
+        account_id = user_id[:12] if user_id else ""
+
+        html = self._load_email_template("criacao_conta.html", {
+            "nome_usuario": display_name,
+            "email_usuario": to_email,
+            "link_acesso": f"{frontend_url}/dashboard",
+            "data_criacao": now_str,
+            "account_id": account_id,
+        })
+        if not html:
+            html = f"""
+            <h2>Conta criada com sucesso!</h2>
+            <p>Olá, {display_name}</p>
+            <p>Sua conta CompletePay foi criada. Acesse o painel para começar:</p>
+            <p><a href="{frontend_url}/dashboard" style="display:inline-block;background:#22c55e;color:#0d0d0d;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;">Acessar meu painel</a></p>
+            <p>— Equipe CompletePay</p>
+            """
+        result = adapter.send_single(from_addr=from_addr, to=to_email, subject=subject, html=html)
+        if result.success:
+            logger.info("Welcome email sent to %s", to_email)
+        else:
+            logger.error("Failed to send welcome email to %s: %s", to_email, result.error)
+        return result.success
+
+    def send_password_reset(
+        self,
+        to_email: str,
+        reset_url: str,
+        user_name: str | None = None,
+        ip_address: str | None = None,
+    ) -> bool:
+        """
+        Envia email de redefinicao de senha (auth). Nao grava em EmailLog.
+        Usa o template recuperacao_conta.html. Retorna True se enviado com sucesso.
+        """
+        adapter = self._get_adapter()
+        settings = get_settings()
+        email_addr = getattr(settings, "email_from_address", None) or "noreply@completepay.com"
+        from_name = getattr(settings, "email_from_name", None) or "CompletePay"
+        from_addr = f"{from_name} <{email_addr}>"
+        subject = "Redefinir sua senha - CompletePay"
+
+        display_name = user_name or to_email.split("@")[0]
+        now_str = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%d/%m/%Y às %H:%M")
+        ip_str = ip_address or "Desconhecido"
+
+        html = self._load_email_template("recuperacao_conta.html", {
+            "nome_usuario": display_name,
+            "email_usuario": to_email,
+            "link_recuperacao": reset_url,
+            "data_solicitacao": now_str,
+            "ip_solicitacao": ip_str,
+            "link_suporte": "#",
+        })
+        if not html:
+            # Fallback inline
+            html = f"""
+            <h2>Redefinir sua senha</h2>
+            <p>Olá, {display_name}</p>
+            <p>Recebemos uma solicitação para redefinir a senha da sua conta.</p>
+            <p><a href="{reset_url}" style="display:inline-block;background:#fbbf24;color:#0d0d0d;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;">Redefinir minha senha</a></p>
+            <p>Ou copie e cole no navegador:</p>
+            <p style="word-break:break-all;color:#666;">{reset_url}</p>
+            <p>Este link expira em 30 minutos. Se você não solicitou, ignore este email.</p>
+            <p>— Equipe CompletePay</p>
+            """
+        result = adapter.send_single(from_addr=from_addr, to=to_email, subject=subject, html=html)
+        if result.success:
+            logger.info("Password reset email sent to %s", to_email)
+        else:
+            logger.error("Failed to send password reset to %s: %s", to_email, result.error)
+        return result.success
+
     def send_booking_confirmation_to_guest(
         self, booking: Booking, event_type: EventType, base_url: str = ""
     ) -> None:
-        """Envia email de confirmacao ao guest."""
+        """Envia email de confirmacao ao guest. Usa agendamento_confirmacao.html."""
         tz = ZoneInfo(booking.timezone)
         local_start = booking.start_time.astimezone(tz)
+        local_end = local_start + timedelta(minutes=booking.duration_minutes)
         cancel_url = f"{base_url}/calendario/booking/{booking.uid}?action=cancel&token={booking.cancel_token}"
         reschedule_url = f"{base_url}/calendario/booking/{booking.uid}?action=reschedule&token={booking.cancel_token}"
 
+        # Try to get host info
+        host_name = ""
+        host_email = ""
+        try:
+            from src.auth.repository import get_user_by_id
+            host_user = get_user_by_id(str(event_type.user_id))
+            if host_user:
+                host_name = getattr(host_user, "name", None) or getattr(host_user, "email", "").split("@")[0]
+                host_email = getattr(host_user, "email", "")
+        except Exception:
+            pass
+
+        # Meses em PT-BR
+        meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+        dias_semana = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
+
         subject = f"Agendamento Confirmado: {event_type.title}"
-        html = self._render_template(
-            TEMPLATE_CONFIRMATION_GUEST,
-            {
-                "guest_name": booking.guest_name,
-                "event_title": event_type.title,
-                "date": local_start.strftime("%d/%m/%Y"),
-                "time": local_start.strftime("%H:%M"),
-                "duration": booking.duration_minutes,
-                "timezone": booking.timezone,
-                "cancel_url": cancel_url,
-                "reschedule_url": reschedule_url,
-            },
-        )
+        html = self._load_email_template("agendamento_confirmacao.html", {
+            "nome_usuario": booking.guest_name,
+            "email_usuario": booking.guest_email,
+            "tipo_reuniao": event_type.title,
+            "mes_abrev": meses[local_start.month - 1],
+            "dia": str(local_start.day).zfill(2),
+            "dia_semana": dias_semana[local_start.weekday()],
+            "horario_inicio": local_start.strftime("%H:%M"),
+            "horario_fim": local_end.strftime("%H:%M"),
+            "fuso_horario": booking.timezone,
+            "formato_reuniao": getattr(event_type, "location_type", "Online") or "Online",
+            "nome_host": host_name,
+            "email_host": host_email,
+            "link_reuniao": getattr(booking, "meeting_url", "") or "",
+            "link_cancelamento": cancel_url,
+            "link_reagendamento": reschedule_url,
+            "link_google_cal": "",
+            "link_outlook": "",
+            "link_ics": "",
+            "observacoes": booking.guest_notes or "Sem observações.",
+            "agendamento_id": str(booking.uid)[:12],
+        })
+
+        if not html:
+            # Fallback to inline template
+            html = self._render_template(
+                TEMPLATE_CONFIRMATION_GUEST,
+                {
+                    "guest_name": booking.guest_name,
+                    "event_title": event_type.title,
+                    "date": local_start.strftime("%d/%m/%Y"),
+                    "time": local_start.strftime("%H:%M"),
+                    "duration": booking.duration_minutes,
+                    "timezone": booking.timezone,
+                    "cancel_url": cancel_url,
+                    "reschedule_url": reschedule_url,
+                },
+            )
 
         self._send(
             to=booking.guest_email,

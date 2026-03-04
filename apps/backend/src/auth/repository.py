@@ -257,3 +257,54 @@ def delete_confirm_token(token: str) -> None:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM email_confirm_tokens WHERE token = %s", (token.strip(),))
             conn.commit()
+
+
+# --- Redefinicao de senha ---
+
+RESET_TOKEN_EXPIRY_MINUTES = 30
+
+
+def create_password_reset_token(user_id: str) -> str:
+    """Cria um token de redefinicao de senha e retorna o token (para enviar no link)."""
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=RESET_TOKEN_EXPIRY_MINUTES)
+    with _get_connection() as conn:
+        with conn.cursor() as cur:
+            # Remove tokens anteriores para evitar acumulo
+            cur.execute("DELETE FROM password_reset_tokens WHERE user_id = %s", (user_id.strip(),))
+            cur.execute(
+                "INSERT INTO password_reset_tokens (token, user_id, expires_at) VALUES (%s, %s, %s)",
+                (token, user_id.strip(), expires_at),
+            )
+            conn.commit()
+    return token
+
+
+def get_user_id_by_reset_token(token: str) -> str | None:
+    """Retorna user_id se o token for valido e nao expirado. None caso contrario."""
+    if not token or len(token) > 64:
+        return None
+    with _get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT user_id FROM password_reset_tokens WHERE token = %s AND expires_at > now()",
+                (token.strip(),),
+            )
+            row = cur.fetchone()
+    return str(row[0]) if row else None
+
+
+def delete_reset_token(token: str) -> None:
+    """Remove o token de redefinicao (apos uso)."""
+    with _get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM password_reset_tokens WHERE token = %s", (token.strip(),))
+            conn.commit()
+
+
+def delete_all_reset_tokens_for_user(user_id: str) -> None:
+    """Remove todos os tokens de redefinicao do usuario."""
+    with _get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM password_reset_tokens WHERE user_id = %s", (user_id.strip(),))
+            conn.commit()

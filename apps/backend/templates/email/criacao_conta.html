@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="x-apple-disable-message-reformatting" />
+    <title>Conta criada — CompletePay</title>
+
+    <!-- Pequeno bloco de suporte (opcional). O essencial está inline. -->
+    <style>
+        /* Mobile: força largura total do container */
+        @media screen and (max-width: 600px) {
+            .container {
+                width: 100% !important;
+            }
+
+            .px {
+                padding-left: 24px !important;
+                padding-right: 24px !important;
+            }
+
+            .h1 {
+                font-size: 28px !important;
+                line-height: 1.15 !important;
+            }
+
+            .stack {
+                display: block !important;
+                width: 100% !important;
+            }
+
+            .center {
+                text-align: center !important;
+            }
+        }
+    </style>
+</head>
+
+<body style="margin:0; padding:0; background-color:#0d0d0d;">
+    <!-- Preheader (texto que aparece no preview do inbox) -->
+    <div style="display:none; max-height:0; overflow:hidden; opacity:0; color:transparent; mso-hide:all;">
+        Sua conta CompletePay foi criada. Acesse o painel para começar.
+    </div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
+        style="background-color:#0d0d0d;">
+        <tr>
+            <td align="center" style="padding:40px 16px;">
+                <!-- Container -->
+                <table role="presentation" class="container" width="600" cellspacing="0" cellpadding="0" border="0"
+                    style="width:600px; max-width:600px;">
+                    <!-- HEADER -->
+                    <tr>
+                        <td class="px"
+                            style="background-color:#111111; border:1px solid #222222; border-bottom:none; border-radius:16px 16px 0 0; padding:40px 48px 32px 48px;">
+                            <!-- Logo row -->
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td width="36" height="36" align="center" valign="middle"
+                                        style="width:36px; height:36px; background-color:#22c55e; border-radius:9px; font-family:Arial, Helvetica, sans-serif; font-size:18px; font-weight:700; color:#0d0d0d; letter-spacing:-1px;">
+                                        CP
+                                    </td>
+                                    <td width="10" style="width:10px;">&nbsp;</td>
+                                    <td valign="middle"
+                                        style="font-family:Arial, Helvetica, sans-serif; font-size:17px; font-weight:600; color:#f0ece4; letter-spacing:-0.3px;">
+                                        CompletePay
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <div style="height:36px; line-height:36px;">&nbsp;</div>
+
+                            <div class="h1"
+                                style="font-family:Georgia, 'Times New Roman', serif; font-size:38px; line-height:1.1; letter-spacing:-0.5px; color:#f0ece4;">
+                                Sua conta foi<br />
+                                <span style="font-style:italic; color:#86efac;">criada com sucesso.</span>
+                            </div>
+
+                            <div style="height:14px; line-height:14px;">&nbsp;</div>
+
+                            <div
+                                style="font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:300; color:#888888; line-height:1.6;">
+                                Bem-vindo à plataforma. Você está a um clique de começar a processar pagamentos.
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- BODY -->
+                    <tr>
+                        <td class="px"
+                            style="background-color:#111111; border-left:1px solid #222222; border-right:1px solid #222222; padding:0 48px;">
+                            <!-- Divider -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td style="height:1px; background-color:#2a2a2a;"></td>
+                                </tr>
+                            </table>
+
+                            <!-- Greeting -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td style="padding:32px 0 28px 0;">
+                                        <div
+                                            style="font-family:Arial, Helvetica, sans-serif; font-size:15px; color:#aaaaaa; line-height:1.75; font-weight:300;">
+                                            Olá, <strong
+                                                style="color:#f0ece4; font-weight:500;">{{nome_usuario}}</strong> 👋
+                                        </div>
+
+                                        <div style="height:10px; line-height:10px;">&nbsp;</div>
+
+                                        <div
+                                            style="font-family:Arial, Helvetica, sans-serif; font-size:15px; color:#aaaaaa; line-height:1.75; font-weight:300;">
+                                            Sua conta CompletePay foi criada e está pronta para uso. Para começar,
+                                            acesse o painel e configure
+                                            seu primeiro método de pagamento. Caso precise de ajuda, nosso time está
+                                            disponível 24/7.
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- CTA -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td align="center" style="padding:4px 0 36px 0;">
+                                        <!-- Botão (compatível) -->
+                                        <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td align="center" style="border-radius:10px; background-color:#22c55e;"
+                                                    bgcolor="#22c55e">
+                                                    <a href="{{link_acesso}}" target="_blank"
+                                                        style="display:inline-block; padding:15px 36px; font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:600; color:#0d0d0d; text-decoration:none; letter-spacing:0.2px; border-radius:10px;">
+                                                        Acessar meu painel →
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                        </table>
+
+                                        <div style="height:14px; line-height:14px;">&nbsp;</div>
+
+                                        <div
+                                            style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#555555;">
+                                            O link expira em 24 horas por segurança.
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Divider -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td style="height:1px; background-color:#2a2a2a;"></td>
+                                </tr>
+                            </table>
+
+                            <!-- Account Info -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td style="padding:28px 0 0 0;">
+                                        <div
+                                            style="font-family:Arial, Helvetica, sans-serif; font-size:11px; text-transform:uppercase; letter-spacing:2px; color:#444444; margin:0 0 16px 0;">
+                                            Detalhes da conta
+                                        </div>
+
+                                        <!-- Card -->
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+                                            border="0"
+                                            style="background-color:#0d0d0d; border:1px solid #1e1e1e; border-radius:12px;">
+                                            <tr>
+                                                <td style="padding:22px 24px;">
+                                                    <!-- Row 1 -->
+                                                    <table role="presentation" width="100%" cellspacing="0"
+                                                        cellpadding="0" border="0">
+                                                        <tr>
+                                                            <td class="stack"
+                                                                style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#555555; padding:9px 0;">
+                                                                E-mail
+                                                            </td>
+                                                            <td class="stack" align="right"
+                                                                style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#cccccc; font-weight:500; padding:9px 0;">
+                                                                {{email_usuario}}
+                                                            </td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td colspan="2"
+                                                                style="height:1px; background-color:#1a1a1a;"></td>
+                                                        </tr>
+
+                                                        <!-- Row 2 -->
+                                                        <tr>
+                                                            <td class="stack"
+                                                                style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#555555; padding:9px 0;">
+                                                                Plano
+                                                            </td>
+                                                            <td class="stack" align="right" style="padding:9px 0;">
+                                                                <span
+                                                                    style="display:inline-block; background-color:rgba(134,239,172,0.12); border:1px solid rgba(134,239,172,0.30); color:#86efac; font-family:Arial, Helvetica, sans-serif; font-size:11px; font-weight:600; padding:3px 9px; border-radius:20px; letter-spacing:0.3px;">
+                                                                    Starter
+                                                                </span>
+                                                            </td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td colspan="2"
+                                                                style="height:1px; background-color:#1a1a1a;"></td>
+                                                        </tr>
+
+                                                        <!-- Row 3 -->
+                                                        <tr>
+                                                            <td class="stack"
+                                                                style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#555555; padding:9px 0;">
+                                                                Data de criação
+                                                            </td>
+                                                            <td class="stack" align="right"
+                                                                style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#cccccc; font-weight:500; padding:9px 0;">
+                                                                {{data_criacao}}
+                                                            </td>
+                                                        </tr>
+                                                        <tr>
+                                                            <td colspan="2"
+                                                                style="height:1px; background-color:#1a1a1a;"></td>
+                                                        </tr>
+
+                                                        <!-- Row 4 -->
+                                                        <tr>
+                                                            <td class="stack"
+                                                                style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#555555; padding:9px 0;">
+                                                                ID da conta
+                                                            </td>
+                                                            <td class="stack" align="right"
+                                                                style="font-family:Courier New, monospace; font-size:12px; color:#555555; padding:9px 0;">
+                                                                {{account_id}}
+                                                            </td>
+                                                        </tr>
+                                                    </table>
+                                                </td>
+                                            </tr>
+                                        </table>
+
+                                        <div style="height:32px; line-height:32px;">&nbsp;</div>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Checklist -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td style="padding:0 0 28px 0; border-top:1px solid #1c1c1c;">
+                                        <div style="height:28px; line-height:28px;">&nbsp;</div>
+
+                                        <div
+                                            style="font-family:Arial, Helvetica, sans-serif; font-size:11px; text-transform:uppercase; letter-spacing:2px; color:#444444; margin:0 0 20px 0;">
+                                            Próximos passos
+                                        </div>
+
+                                        <!-- Item -->
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+                                            border="0" style="margin:0 0 16px 0;">
+                                            <tr>
+                                                <td width="22" valign="top" style="width:22px; padding-top:2px;">
+                                                    <div
+                                                        style="width:22px; height:22px; border-radius:6px; background-color:rgba(134,239,172,0.10); border:1px solid rgba(134,239,172,0.25); text-align:center; line-height:22px;">
+                                                        <span
+                                                            style="color:#86efac; font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:700;">✓</span>
+                                                    </div>
+                                                </td>
+                                                <td width="14" style="width:14px;">&nbsp;</td>
+                                                <td valign="top">
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:500; color:#e0dbd0; margin:0 0 2px 0;">
+                                                        Verifique seu e-mail
+                                                    </div>
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; font-weight:300;">
+                                                        Confirme seu endereço para desbloquear todos os recursos.
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </table>
+
+                                        <!-- Item -->
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+                                            border="0" style="margin:0 0 16px 0;">
+                                            <tr>
+                                                <td width="22" valign="top" style="width:22px; padding-top:2px;">
+                                                    <div
+                                                        style="width:22px; height:22px; border-radius:6px; background-color:rgba(134,239,172,0.10); border:1px solid rgba(134,239,172,0.25); text-align:center; line-height:22px;">
+                                                        <span
+                                                            style="color:#86efac; font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:700;">✓</span>
+                                                    </div>
+                                                </td>
+                                                <td width="14" style="width:14px;">&nbsp;</td>
+                                                <td valign="top">
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:500; color:#e0dbd0; margin:0 0 2px 0;">
+                                                        Configure sua chave de API
+                                                    </div>
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; font-weight:300;">
+                                                        Integre o CompletePay ao seu sistema em minutos.
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </table>
+
+                                        <!-- Item -->
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+                                            border="0">
+                                            <tr>
+                                                <td width="22" valign="top" style="width:22px; padding-top:2px;">
+                                                    <div
+                                                        style="width:22px; height:22px; border-radius:6px; background-color:rgba(134,239,172,0.10); border:1px solid rgba(134,239,172,0.25); text-align:center; line-height:22px;">
+                                                        <span
+                                                            style="color:#86efac; font-family:Arial, Helvetica, sans-serif; font-size:12px; font-weight:700;">✓</span>
+                                                    </div>
+                                                </td>
+                                                <td width="14" style="width:14px;">&nbsp;</td>
+                                                <td valign="top">
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:500; color:#e0dbd0; margin:0 0 2px 0;">
+                                                        Adicione um método de recebimento
+                                                    </div>
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; font-weight:300;">
+                                                        Conta bancária ou chave Pix para receber seus pagamentos.
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </table>
+
+                                        <div style="height:6px; line-height:6px;">&nbsp;</div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- FOOTER -->
+                    <tr>
+                        <td class="px"
+                            style="background-color:#0d0d0d; border:1px solid #1a1a1a; border-top:none; border-radius:0 0 16px 16px; padding:28px 48px 36px 48px;">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td
+                                        style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#444444; padding-bottom:18px;">
+                                        <a href="#" style="color:#444444; text-decoration:none;">Central de Ajuda</a>
+                                        <span style="padding:0 10px;">·</span>
+                                        <a href="#" style="color:#444444; text-decoration:none;">Documentação</a>
+                                        <span style="padding:0 10px;">·</span>
+                                        <a href="#" style="color:#444444; text-decoration:none;">Termos de Uso</a>
+                                        <span style="padding:0 10px;">·</span>
+                                        <a href="#" style="color:#444444; text-decoration:none;">Privacidade</a>
+                                        <span style="padding:0 10px;">·</span>
+                                        <a href="#" style="color:#444444; text-decoration:none;">Cancelar inscrição</a>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td
+                                        style="font-family:Arial, Helvetica, sans-serif; font-size:11px; color:#333333; line-height:1.7;">
+                                        Você está recebendo este e-mail porque uma conta foi criada com este endereço no
+                                        CompletePay.<br />
+                                        CompletePay Tecnologia Ltda · Brasil · <a href="#"
+                                            style="color:#444444; text-decoration:underline;">Política de
+                                            Privacidade</a>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                </table>
+                <!-- /Container -->
+            </td>
+        </tr>
+    </table>
+</body>
+
+</html>

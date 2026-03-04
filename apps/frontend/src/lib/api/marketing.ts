@@ -229,3 +229,16 @@ export async function verifyDomain(id: string): Promise<EmailDomain> {
     const { data } = await apiClient.post(`${BASE}/domains/${id}/verify`);
     return data;
 }
+
+// ── Envio de teste ─────────────────────────────────────────────────────────────
+
+export async function sendTestEmail(body: {
+    to_email: string;
+    subject: string;
+    html_content: string;
+    from_name?: string;
+    from_email?: string;
+}): Promise<{ message: string; esp_id: string }> {
+    const { data } = await apiClient.post(`${BASE}/send-single`, body);
+    return data;
+}

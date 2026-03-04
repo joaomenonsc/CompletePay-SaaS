@@ -28,6 +28,7 @@ import {
     updateCampaign,
     updateDomain,
     updateTemplate,
+    sendTestEmail,
     verifyDomain,
 } from "@/lib/api/marketing";
 import type {
@@ -291,5 +292,19 @@ export function useVerifyDomain() {
             qc.invalidateQueries({ queryKey: DOMAINS_KEY });
             qc.invalidateQueries({ queryKey: [...DOMAINS_KEY, id] });
         },
+    });
+}
+
+// ── Envio de teste ─────────────────────────────────────────────────────────────
+
+export function useSendTestEmail() {
+    return useMutation({
+        mutationFn: (body: {
+            to_email: string;
+            subject: string;
+            html_content: string;
+            from_name?: string;
+            from_email?: string;
+        }) => sendTestEmail(body),
     });
 }

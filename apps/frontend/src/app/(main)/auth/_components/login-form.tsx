@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import Link from "next/link";
+
 import { useRouter } from "next/navigation";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -121,6 +123,14 @@ export function LoginForm() {
             </FormItem>
           )}
         />
+        <div className="flex justify-end">
+          <Link
+            href="/auth/v2/esqueci-senha"
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Esqueci minha senha
+          </Link>
+        </div>
         <FormField
           control={form.control}
           name="remember"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import {
     ArrowLeft,
@@ -10,6 +10,8 @@ import {
     Send,
     Variable,
     ChevronDown,
+    Monitor,
+    Smartphone,
 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -31,11 +33,20 @@ import {
     PopoverContent,
     PopoverTrigger,
 } from "@/components/ui/popover";
-import { useTemplate, useCreateTemplate, useUpdateTemplate } from "@/hooks/use-marketing";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+} from "@/components/ui/dialog";
+import { useTemplate, useCreateTemplate, useUpdateTemplate, useSendTestEmail } from "@/hooks/use-marketing";
 import type { TemplateCategory } from "@/types/marketing";
 import { EmailEditor } from "@/components/email-marketing/email-editor";
 import { useEmailBuilderStore } from "@/stores/email-builder-store";
-import { generateHtmlFromBlocks } from "@/components/email-marketing/builder/utils";
+import { generateHtmlFromBlocks, generateEmailHtml } from "@/components/email-marketing/builder/utils";
 
 // ── Merge variables ────────────────────────────────────────────────────────────
 
@@ -66,6 +77,16 @@ export default function TemplateEditorPage() {
     const [subject, setSubject] = useState("");
     const [category, setCategory] = useState<string>("boas-vindas");
 
+    // Send test email
+    const [testDialogOpen, setTestDialogOpen] = useState(false);
+    const [testEmail, setTestEmail] = useState("");
+    const sendTestMutation = useSendTestEmail();
+
+    // Preview
+    const [previewOpen, setPreviewOpen] = useState(false);
+    const [previewHtml, setPreviewHtml] = useState("");
+    const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
+
     // Initialize from API data
     const [initialized, setInitialized] = useState(false);
     if (existingTemplate && !initialized) {
@@ -79,20 +100,30 @@ export default function TemplateEditorPage() {
     const editorContent = existingTemplate?.blocks_json || existingTemplate?.html_content || "";
 
     // Insert variable into selected text block
-    const { blocks, selectedBlockId, updateBlockContent } = useEmailBuilderStore();
     const insertVariable = useCallback(
         (varKey: string) => {
-            if (!selectedBlockId) return;
-            const block = blocks.find((b) => b.id === selectedBlockId);
-            if (!block) return;
-            const content = block.content as any;
-            if ("text" in content) {
-                updateBlockContent(selectedBlockId, {
-                    text: (content.text || "") + `{{${varKey}}}`,
-                });
+            const { selectedBlockId: selId, blocks: currentBlocks, updateBlockContent: update } =
+                useEmailBuilderStore.getState();
+            if (!selId) {
+                toast.error("Selecione um bloco de texto antes de inserir uma variável.");
+                return;
             }
+            const block = currentBlocks.find((b) => b.id === selId);
+            if (!block) {
+                toast.error("Bloco não encontrado.");
+                return;
+            }
+            const content = block.content as any;
+            if (!("text" in content)) {
+                toast.error("Variáveis só podem ser inseridas em blocos de texto, título ou subtítulo.");
+                return;
+            }
+            update(selId, {
+                text: (content.text || "") + `{{${varKey}}}`,
+            });
+            toast.success(`Variável {{${varKey}}} inserida!`);
         },
-        [selectedBlockId, blocks, updateBlockContent]
+        []
     );
 
     // Save handler — reads blocks directly from the store at save time
@@ -153,6 +184,41 @@ export default function TemplateEditorPage() {
     }, [templateName, subject, category, isNew, templateId, createMutation, updateMutation, router]);
 
     const isSaving = createMutation.isPending || updateMutation.isPending;
+
+    const handleSendTest = useCallback(() => {
+        if (!testEmail.trim()) {
+            toast.error("Informe o email de destino.");
+            return;
+        }
+
+        const currentBlocks = useEmailBuilderStore.getState().blocks;
+        const html = generateEmailHtml(currentBlocks);
+
+        if (!html || html.trim() === "") {
+            toast.error("O template está vazio. Adicione conteúdo antes de enviar.");
+            return;
+        }
+
+        sendTestMutation.mutate(
+            {
+                to_email: testEmail.trim(),
+                subject: subject || `[TESTE] ${templateName || "Template sem nome"}`,
+                html_content: html,
+            },
+            {
+                onSuccess: () => {
+                    toast.success(`Email de teste enviado para ${testEmail.trim()}!`);
+                    setTestDialogOpen(false);
+                    setTestEmail("");
+                },
+                onError: (err: any) => {
+                    toast.error(
+                        err?.response?.data?.detail || "Erro ao enviar email de teste."
+                    );
+                },
+            }
+        );
+    }, [testEmail, subject, templateName, sendTestMutation]);
 
     if (isLoading) {
         return (
@@ -259,14 +325,134 @@ export default function TemplateEditorPage() {
 
                     <Separator orientation="vertical" className="h-6" />
 
-                    <Button variant="outline" size="sm">
+                    <Button variant="outline" size="sm" onClick={() => {
+                        const currentBlocks = useEmailBuilderStore.getState().blocks;
+                        if (currentBlocks.length === 0) {
+                            toast.error("Adicione blocos ao template antes de visualizar.");
+                            return;
+                        }
+                        setPreviewHtml(generateEmailHtml(currentBlocks));
+                        setPreviewOpen(true);
+                    }}>
                         <Eye className="mr-1.5 size-3.5" />
                         Preview
                     </Button>
-                    <Button variant="outline" size="sm">
-                        <Send className="mr-1.5 size-3.5" />
-                        Enviar teste
-                    </Button>
+
+                    {/* Preview Dialog */}
+                    <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+                        <DialogContent className="sm:max-w-3xl h-[85vh] flex flex-col p-0 gap-0">
+                            <DialogHeader className="px-6 pt-5 pb-3 border-b shrink-0">
+                                <div className="flex items-center justify-between">
+                                    <div>
+                                        <DialogTitle>Preview do email</DialogTitle>
+                                        <DialogDescription>
+                                            Visualização de como o email será entregue ao destinatário.
+                                        </DialogDescription>
+                                    </div>
+                                    <div className="flex items-center gap-1 rounded-lg border bg-muted p-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => setPreviewDevice("desktop")}
+                                            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${previewDevice === "desktop"
+                                                ? "bg-background text-foreground shadow-sm"
+                                                : "text-muted-foreground hover:text-foreground"
+                                                }`}
+                                        >
+                                            <Monitor className="size-3.5" />
+                                            Desktop
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPreviewDevice("mobile")}
+                                            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${previewDevice === "mobile"
+                                                ? "bg-background text-foreground shadow-sm"
+                                                : "text-muted-foreground hover:text-foreground"
+                                                }`}
+                                        >
+                                            <Smartphone className="size-3.5" />
+                                            Mobile
+                                        </button>
+                                    </div>
+                                </div>
+                            </DialogHeader>
+                            <div className="flex-1 overflow-auto bg-muted/30 flex items-start justify-center p-6">
+                                <div
+                                    className="bg-white rounded-lg shadow-lg overflow-hidden transition-all duration-300"
+                                    style={{
+                                        width: previewDevice === "mobile" ? 375 : 680,
+                                        maxWidth: "100%",
+                                    }}
+                                >
+                                    <iframe
+                                        srcDoc={previewHtml}
+                                        title="Email Preview"
+                                        sandbox="allow-same-origin"
+                                        className="w-full border-0"
+                                        style={{ minHeight: 500, height: "100%" }}
+                                        onLoad={(e) => {
+                                            const iframe = e.target as HTMLIFrameElement;
+                                            if (iframe.contentDocument?.body) {
+                                                iframe.style.height = iframe.contentDocument.body.scrollHeight + 20 + "px";
+                                            }
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        </DialogContent>
+                    </Dialog>
+                    <Dialog open={testDialogOpen} onOpenChange={setTestDialogOpen}>
+                        <DialogTrigger asChild>
+                            <Button variant="outline" size="sm">
+                                <Send className="mr-1.5 size-3.5" />
+                                Enviar teste
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-md">
+                            <DialogHeader>
+                                <DialogTitle>Enviar email de teste</DialogTitle>
+                                <DialogDescription>
+                                    O conteúdo atual do template será enviado para o email informado.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-3 py-2">
+                                <div className="space-y-1.5">
+                                    <Label htmlFor="test-email">Email de destino</Label>
+                                    <Input
+                                        id="test-email"
+                                        type="email"
+                                        placeholder="seuemail@exemplo.com"
+                                        value={testEmail}
+                                        onChange={(e) => setTestEmail(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter") handleSendTest();
+                                        }}
+                                    />
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                    Assunto: <span className="font-medium">{subject || `[TESTE] ${templateName || "Template sem nome"}`}</span>
+                                </p>
+                            </div>
+                            <DialogFooter>
+                                <Button
+                                    variant="outline"
+                                    onClick={() => setTestDialogOpen(false)}
+                                >
+                                    Cancelar
+                                </Button>
+                                <Button
+                                    onClick={handleSendTest}
+                                    disabled={sendTestMutation.isPending || !testEmail.trim()}
+                                >
+                                    {sendTestMutation.isPending ? (
+                                        <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                                    ) : (
+                                        <Send className="mr-1.5 size-3.5" />
+                                    )}
+                                    {sendTestMutation.isPending ? "Enviando..." : "Enviar"}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
                     <Button size="sm" onClick={handleSave} disabled={isSaving || !templateName}>
                         {isSaving ? (
                             <Loader2 className="mr-1.5 size-3.5 animate-spin" />

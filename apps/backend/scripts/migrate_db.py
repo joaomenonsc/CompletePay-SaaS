@@ -56,6 +56,16 @@ def run_migrate() -> int:
                 """)
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_email_confirm_tokens_user_id ON email_confirm_tokens(user_id);")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_email_confirm_tokens_expires_at ON email_confirm_tokens(expires_at);")
+                # Password reset tokens (forgot-password flow)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                        token VARCHAR(64) PRIMARY KEY,
+                        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        expires_at TIMESTAMPTZ NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    );
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id);")
                 # Contas existentes passam a ser consideradas confirmadas
                 cur.execute("""
                     UPDATE users SET email_confirmed_at = created_at WHERE email_confirmed_at IS NULL;

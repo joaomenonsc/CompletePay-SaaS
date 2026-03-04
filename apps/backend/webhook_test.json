@@ -1,0 +1,7 @@
+{
+  "from": "cliente@gmail.com",
+  "to": "atendimento@app.completepay.digital",
+  "subject": "Dúvida sobre o produto",
+  "text": "Gostaria de saber mais sobre as funcionalidades...",
+  "html": "<p>Gostaria de saber mais sobre as funcionalidades...</p>"
+}

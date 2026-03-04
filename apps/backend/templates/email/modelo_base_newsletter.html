@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="x-apple-disable-message-reformatting" />
+    <title>Newsletter — CompletePay</title>
+
+    <style>
+        @media screen and (max-width: 600px) {
+            .container {
+                width: 100% !important;
+            }
+
+            .px {
+                padding-left: 24px !important;
+                padding-right: 24px !important;
+            }
+
+            .h1 {
+                font-size: 28px !important;
+                line-height: 1.15 !important;
+            }
+
+            .stack {
+                display: block !important;
+                width: 100% !important;
+            }
+
+            .center {
+                text-align: center !important;
+            }
+
+            .hide-mobile {
+                display: none !important;
+            }
+        }
+    </style>
+</head>
+
+<body style="margin:0; padding:0; background-color:#0d0d0d;">
+    <!-- Preheader -->
+    <div style="display:none; max-height:0; overflow:hidden; opacity:0; color:transparent; mso-hide:all;">
+        {{titulo_principal_l1}} — {{titulo_principal_l2}} · Edição #{{numero_edicao}}
+    </div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
+        style="background-color:#0d0d0d;">
+        <tr>
+            <td align="center" style="padding:40px 16px;">
+                <!-- Container -->
+                <table role="presentation" class="container" width="600" cellspacing="0" cellpadding="0" border="0"
+                    style="width:600px; max-width:600px;">
+
+                    <!-- HEADER -->
+                    <tr>
+                        <td class="px"
+                            style="background-color:#111111; border:1px solid #222222; border-bottom:none; border-radius:16px 16px 0 0; padding:36px 48px 32px 48px;">
+                            <!-- Top bar (logo + edição) -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td valign="middle" class="stack">
+                                        <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td width="34" height="34" align="center" valign="middle"
+                                                    style="width:34px; height:34px; background-color:#22c55e; border-radius:8px; font-family:Arial, Helvetica, sans-serif; font-size:16px; font-weight:700; color:#0d0d0d;">
+                                                    CP
+                                                </td>
+                                                <td width="10" style="width:10px;">&nbsp;</td>
+                                                <td valign="middle"
+                                                    style="font-family:Arial, Helvetica, sans-serif; font-size:16px; font-weight:600; color:#f0ece4; letter-spacing:-0.3px;">
+                                                    CompletePay
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                    <td valign="middle" align="right" class="stack" style="padding-top:0;">
+                                        <div
+                                            style="font-family:Arial, Helvetica, sans-serif; font-size:11px; color:#444444; letter-spacing:1.5px; text-transform:uppercase;">
+                                            Edição #{{numero_edicao}}
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <div style="height:20px; line-height:20px;">&nbsp;</div>
+
+                            <!-- Edition tag -->
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0"
+                                style="border-collapse:separate;">
+                                <tr>
+                                    <td
+                                        style="background-color:rgba(167,139,250,0.10); border:1px solid rgba(167,139,250,0.22); border-radius:20px; padding:5px 13px 5px 10px;">
+                                        <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                                            <tr>
+                                                <td width="7" style="width:7px;">
+                                                    <div
+                                                        style="width:7px; height:7px; background-color:#a78bfa; border-radius:50%;">
+                                                        &nbsp;</div>
+                                                </td>
+                                                <td width="7" style="width:7px;">&nbsp;</td>
+                                                <td
+                                                    style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#a78bfa; font-weight:500; letter-spacing:0.3px;">
+                                                    {{mes_edicao}} · {{ano_edicao}}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <div style="height:18px; line-height:18px;">&nbsp;</div>
+
+                            <!-- Headline -->
+                            <div class="h1"
+                                style="font-family:Georgia, 'Times New Roman', serif; font-size:36px; line-height:1.1; letter-spacing:-0.5px; color:#f0ece4;">
+                                {{titulo_principal_l1}}<br />
+                                <span style="font-style:italic; color:#a78bfa;">{{titulo_principal_l2}}</span>
+                            </div>
+
+                            <div style="height:16px; line-height:16px;">&nbsp;</div>
+
+                            <!-- Header meta -->
+                            <div style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#444444;">
+                                {{tempo_leitura}} min de leitura
+                                <span style="padding:0 10px;">·</span>
+                                {{total_artigos}} artigos
+                                <span style="padding:0 10px;">·</span>
+                                {{data_envio}}
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- BODY -->
+                    <tr>
+                        <td class="px"
+                            style="background-color:#111111; border-left:1px solid #222222; border-right:1px solid #222222; padding:0 48px;">
+                            <!-- Divider -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td style="height:1px; background-color:#2a2a2a;"></td>
+                                </tr>
+                            </table>
+
+                            <!-- Intro -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td style="padding:32px 0 28px 0;">
+                                        <div
+                                            style="font-family:Arial, Helvetica, sans-serif; font-size:15px; color:#999999; line-height:1.8; font-weight:300;">
+                                            Olá, <strong
+                                                style="color:#e0dbd0; font-weight:500;">{{nome_usuario}}</strong> 👋
+                                        </div>
+                                        <div style="height:12px; line-height:12px;">&nbsp;</div>
+                                        <div
+                                            style="font-family:Arial, Helvetica, sans-serif; font-size:15px; color:#999999; line-height:1.8; font-weight:300;">
+                                            {{texto_introducao}}
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Metrics strip -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
+                                style="margin:0 0 32px 0; background-color:#0d0d0d; border:1px solid #1e1e1e; border-radius:12px;">
+                                <tr>
+                                    <td class="stack" align="center"
+                                        style="padding:18px 16px; border-right:1px solid #1a1a1a;">
+                                        <div
+                                            style="font-family:Georgia, 'Times New Roman', serif; font-size:22px; color:#f0ece4; letter-spacing:-0.5px;">
+                                            {{metrica_1_valor}}<span style="color:#a78bfa;">{{metrica_1_sufixo}}</span>
+                                        </div>
+                                        <div
+                                            style="font-family:Arial, Helvetica, sans-serif; font-size:11px; color:#444444; font-weight:400;">
+                                            {{metrica_1_label}}
+                                        </div>
+                                    </td>
+
+                                    <td class="stack" align="center"
+                                        style="padding:18px 16px; border-right:1px solid #1a1a1a;">
+                                        <div
+                                            style="font-family:Georgia, 'Times New Roman', serif; font-size:22px; color:#f0ece4; letter-spacing:-0.5px;">
+                                            {{metrica_2_valor}}<span style="color:#a78bfa;">{{metrica_2_sufixo}}</span>
+                                        </div>
+                                        <div
+                                            style="font-family:Arial, Helvetica, sans-serif; font-size:11px; color:#444444; font-weight:400;">
+                                            {{metrica_2_label}}
+                                        </div>
+                                    </td>
+
+                                    <td class="stack" align="center" style="padding:18px 16px;">
+                                        <div
+                                            style="font-family:Georgia, 'Times New Roman', serif; font-size:22px; color:#f0ece4; letter-spacing:-0.5px;">
+                                            {{metrica_3_valor}}<span style="color:#a78bfa;">{{metrica_3_sufixo}}</span>
+                                        </div>
+                                        <div
+                                            style="font-family:Arial, Helvetica, sans-serif; font-size:11px; color:#444444; font-weight:400;">
+                                            {{metrica_3_label}}
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Divider -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td style="height:1px; background-color:#2a2a2a;"></td>
+                                </tr>
+                            </table>
+
+                            <!-- Feature -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td style="padding:28px 0 8px 0;">
+                                        <div
+                                            style="font-family:Arial, Helvetica, sans-serif; font-size:10px; text-transform:uppercase; letter-spacing:2.5px; color:#333333; margin:0 0 18px 0;">
+                                            Destaque da edição
+                                        </div>
+
+                                        <!-- Feature card -->
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+                                            border="0"
+                                            style="background-color:#130f1e; border:1px solid #2a1f3d; border-radius:14px;">
+                                            <tr>
+                                                <td style="padding:28px;">
+                                                    <span
+                                                        style="display:inline-block; background-color:rgba(167,139,250,0.15); border:1px solid rgba(167,139,250,0.30); color:#a78bfa; font-family:Arial, Helvetica, sans-serif; font-size:10px; font-weight:600; letter-spacing:1.5px; text-transform:uppercase; padding:3px 10px; border-radius:20px;">
+                                                        {{feature_tag}}
+                                                    </span>
+
+                                                    <div style="height:14px; line-height:14px;">&nbsp;</div>
+
+                                                    <div
+                                                        style="font-family:Georgia, 'Times New Roman', serif; font-size:22px; color:#f0ece4; line-height:1.2; letter-spacing:-0.3px;">
+                                                        {{feature_titulo}}
+                                                    </div>
+
+                                                    <div style="height:10px; line-height:10px;">&nbsp;</div>
+
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:14px; color:#888888; line-height:1.7; font-weight:300;">
+                                                        {{feature_descricao}}
+                                                    </div>
+
+                                                    <div style="height:18px; line-height:18px;">&nbsp;</div>
+
+                                                    <a href="{{feature_link}}" target="_blank"
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:13px; font-weight:500; color:#a78bfa; text-decoration:none;">
+                                                        Ler artigo completo →
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Articles -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td style="padding:28px 0; border-top:1px solid #1c1c1c;">
+                                        <div
+                                            style="font-family:Arial, Helvetica, sans-serif; font-size:10px; text-transform:uppercase; letter-spacing:2.5px; color:#333333; margin:0 0 18px 0;">
+                                            Nesta edição
+                                        </div>
+
+                                        <!-- Artigo 1 -->
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+                                            border="0" style="padding:16px 0; border-bottom:1px solid #181818;">
+                                            <tr>
+                                                <td width="36" valign="top"
+                                                    style="width:36px; padding-top:2px; font-family:Georgia, 'Times New Roman', serif; font-size:28px; color:#222222; line-height:1; text-align:right;">
+                                                    01
+                                                </td>
+                                                <td width="16" style="width:16px;">&nbsp;</td>
+                                                <td valign="top">
+                                                    <span
+                                                        style="display:inline-block; font-family:Arial, Helvetica, sans-serif; font-size:10px; text-transform:uppercase; letter-spacing:1.5px; font-weight:600; padding:2px 8px; border-radius:20px; background-color:rgba(134,239,172,0.10); color:#86efac;">
+                                                        {{artigo1_tag}}
+                                                    </span>
+                                                    <div style="height:7px; line-height:7px;">&nbsp;</div>
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:500; color:#e0dbd0; line-height:1.35;">
+                                                        {{artigo1_titulo}}
+                                                    </div>
+                                                    <div style="height:6px; line-height:6px;">&nbsp;</div>
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; line-height:1.65; font-weight:300;">
+                                                        {{artigo1_descricao}}
+                                                    </div>
+                                                    <div style="height:10px; line-height:10px;">&nbsp;</div>
+                                                    <a href="{{artigo1_link}}" target="_blank"
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#555555; text-decoration:none; font-weight:500;">
+                                                        Continuar lendo →
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                        </table>
+
+                                        <!-- Artigo 2 -->
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+                                            border="0" style="padding:16px 0; border-bottom:1px solid #181818;">
+                                            <tr>
+                                                <td width="36" valign="top"
+                                                    style="width:36px; padding-top:2px; font-family:Georgia, 'Times New Roman', serif; font-size:28px; color:#222222; line-height:1; text-align:right;">
+                                                    02
+                                                </td>
+                                                <td width="16" style="width:16px;">&nbsp;</td>
+                                                <td valign="top">
+                                                    <span
+                                                        style="display:inline-block; font-family:Arial, Helvetica, sans-serif; font-size:10px; text-transform:uppercase; letter-spacing:1.5px; font-weight:600; padding:2px 8px; border-radius:20px; background-color:rgba(251,191,36,0.10); color:#fbbf24;">
+                                                        {{artigo2_tag}}
+                                                    </span>
+                                                    <div style="height:7px; line-height:7px;">&nbsp;</div>
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:500; color:#e0dbd0; line-height:1.35;">
+                                                        {{artigo2_titulo}}
+                                                    </div>
+                                                    <div style="height:6px; line-height:6px;">&nbsp;</div>
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; line-height:1.65; font-weight:300;">
+                                                        {{artigo2_descricao}}
+                                                    </div>
+                                                    <div style="height:10px; line-height:10px;">&nbsp;</div>
+                                                    <a href="{{artigo2_link}}" target="_blank"
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#555555; text-decoration:none; font-weight:500;">
+                                                        Continuar lendo →
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                        </table>
+
+                                        <!-- Artigo 3 -->
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+                                            border="0" style="padding:16px 0; border-bottom:1px solid #181818;">
+                                            <tr>
+                                                <td width="36" valign="top"
+                                                    style="width:36px; padding-top:2px; font-family:Georgia, 'Times New Roman', serif; font-size:28px; color:#222222; line-height:1; text-align:right;">
+                                                    03
+                                                </td>
+                                                <td width="16" style="width:16px;">&nbsp;</td>
+                                                <td valign="top">
+                                                    <span
+                                                        style="display:inline-block; font-family:Arial, Helvetica, sans-serif; font-size:10px; text-transform:uppercase; letter-spacing:1.5px; font-weight:600; padding:2px 8px; border-radius:20px; background-color:rgba(99,179,237,0.10); color:#63b3ed;">
+                                                        {{artigo3_tag}}
+                                                    </span>
+                                                    <div style="height:7px; line-height:7px;">&nbsp;</div>
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:500; color:#e0dbd0; line-height:1.35;">
+                                                        {{artigo3_titulo}}
+                                                    </div>
+                                                    <div style="height:6px; line-height:6px;">&nbsp;</div>
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; line-height:1.65; font-weight:300;">
+                                                        {{artigo3_descricao}}
+                                                    </div>
+                                                    <div style="height:10px; line-height:10px;">&nbsp;</div>
+                                                    <a href="{{artigo3_link}}" target="_blank"
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#555555; text-decoration:none; font-weight:500;">
+                                                        Continuar lendo →
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                        </table>
+
+                                        <!-- Artigo 4 -->
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+                                            border="0" style="padding:16px 0;">
+                                            <tr>
+                                                <td width="36" valign="top"
+                                                    style="width:36px; padding-top:2px; font-family:Georgia, 'Times New Roman', serif; font-size:28px; color:#222222; line-height:1; text-align:right;">
+                                                    04
+                                                </td>
+                                                <td width="16" style="width:16px;">&nbsp;</td>
+                                                <td valign="top">
+                                                    <span
+                                                        style="display:inline-block; font-family:Arial, Helvetica, sans-serif; font-size:10px; text-transform:uppercase; letter-spacing:1.5px; font-weight:600; padding:2px 8px; border-radius:20px; background-color:rgba(167,139,250,0.10); color:#a78bfa;">
+                                                        {{artigo4_tag}}
+                                                    </span>
+                                                    <div style="height:7px; line-height:7px;">&nbsp;</div>
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:15px; font-weight:500; color:#e0dbd0; line-height:1.35;">
+                                                        {{artigo4_titulo}}
+                                                    </div>
+                                                    <div style="height:6px; line-height:6px;">&nbsp;</div>
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; line-height:1.65; font-weight:300;">
+                                                        {{artigo4_descricao}}
+                                                    </div>
+                                                    <div style="height:10px; line-height:10px;">&nbsp;</div>
+                                                    <a href="{{artigo4_link}}" target="_blank"
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#555555; text-decoration:none; font-weight:500;">
+                                                        Continuar lendo →
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                        </table>
+
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Divider -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td style="height:1px; background-color:#2a2a2a;"></td>
+                                </tr>
+                            </table>
+
+                            <!-- CTA Banner -->
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                                <tr>
+                                    <td style="padding:28px 0 32px 0;">
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0"
+                                            border="0"
+                                            style="background-color:#111111; border:1px solid #2a1f3d; border-radius:14px;">
+                                            <tr>
+                                                <td align="center" style="padding:28px 24px;">
+                                                    <div
+                                                        style="font-family:Georgia, 'Times New Roman', serif; font-size:22px; color:#f0ece4; margin:0 0 8px 0;">
+                                                        {{cta_titulo}}
+                                                    </div>
+                                                    <div
+                                                        style="font-family:Arial, Helvetica, sans-serif; font-size:13px; color:#666666; font-weight:300; margin:0 0 20px 0; line-height:1.7;">
+                                                        {{cta_descricao}}
+                                                    </div>
+
+                                                    <table role="presentation" cellspacing="0" cellpadding="0"
+                                                        border="0">
+                                                        <tr>
+                                                            <td align="center"
+                                                                style="border-radius:9px; background-color:#a78bfa;"
+                                                                bgcolor="#a78bfa">
+                                                                <a href="{{cta_link}}" target="_blank"
+                                                                    style="display:inline-block; padding:13px 32px; font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:700; color:#0d0d0d; text-decoration:none; border-radius:9px; letter-spacing:0.2px;">
+                                                                    {{cta_botao}}
+                                                                </a>
+                                                            </td>
+                                                        </tr>
+                                                    </table>
+
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+
+                        </td>
+                    </tr>
+
+                    <!-- FOOTER -->
+                    <tr>
+                        <td class="px"
+                            style="background-color:#0d0d0d; border:1px solid #1a1a1a; border-top:none; border-radius:0 0 16px 16px; padding:28px 48px 36px 48px;">
+                            <div
+                                style="font-family:Arial, Helvetica, sans-serif; font-size:12px; color:#444444; padding-bottom:18px;">
+                                <a href="#" style="color:#444444; text-decoration:none;">Ver no navegador</a>
+                                <span style="padding:0 10px;">·</span>
+                                <a href="#" style="color:#444444; text-decoration:none;">Edições anteriores</a>
+                                <span style="padding:0 10px;">·</span>
+                                <a href="#" style="color:#444444; text-decoration:none;">Gerenciar preferências</a>
+                                <span style="padding:0 10px;">·</span>
+                                <a href="#" style="color:#444444; text-decoration:none;">Cancelar inscrição</a>
+                            </div>
+
+                            <div
+                                style="font-family:Arial, Helvetica, sans-serif; font-size:11px; color:#333333; line-height:1.7;">
+                                Você está recebendo esta newsletter porque se inscreveu com
+                                <strong style="color:#444444; font-weight:600;">{{email_usuario}}</strong>.<br />
+                                CompletePay Tecnologia Ltda · Brasil · <a href="#"
+                                    style="color:#444444; text-decoration:underline;">Política de Privacidade</a>
+                            </div>
+                        </td>
+                    </tr>
+
+                </table>
+                <!-- /Container -->
+            </td>
+        </tr>
+    </table>
+</body>
+
+</html>

@@ -9,13 +9,16 @@ from src.api.middleware.auth import require_user_id
 from src.auth.repository import (
     confirm_user_email,
     create_email_confirm_token,
+    create_password_reset_token,
     create_session,
     create_user,
     delete_confirm_token,
+    delete_reset_token,
     delete_session_and_revoke,
     get_user_by_email,
     get_user_by_id,
     get_user_id_by_confirm_token,
+    get_user_id_by_reset_token,
     list_sessions,
     revoke_all_sessions_for_user,
     update_user_avatar,
@@ -135,6 +138,7 @@ def login(body: LoginBody, request: Request) -> TokenResponse:
 def confirm_email(
     body: ConfirmEmailBody,
     request: Request,
+    db: Session = Depends(get_db),
 ) -> TokenResponse:
     """
     Confirma o email usando o token enviado por email. Invalida o token e retorna JWT (login automatico).
@@ -152,6 +156,14 @@ def confirm_email(
     token, jti = create_access_token(user_id, role=role)
     device_info, ip_address = _client_info(request)
     create_session(user_id, jti, device_info=device_info, ip_address=ip_address)
+
+    # Envia email de boas-vindas (criacao_conta.html)
+    if user:
+        email_svc = EmailService(db)
+        user_email = getattr(user, "email", "")
+        user_name = getattr(user, "name", None)
+        email_svc.send_welcome_email(user_email, user_name=user_name, user_id=user_id)
+
     return TokenResponse(access_token=token)
 
 
@@ -176,6 +188,64 @@ def resend_confirmation(
     email_svc.send_account_confirmation(user.email, confirm_url)
     return {"message": "Email de confirmação reenviado. Verifique sua caixa de entrada."}
 
+
+class ForgotPasswordBody(BaseModel):
+    email: str = Field(..., min_length=1)
+
+
+class ResetPasswordBody(BaseModel):
+    token: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=MIN_PASSWORD_LEN)
+
+
+@router.post("/forgot-password")
+def forgot_password(
+    body: ForgotPasswordBody,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Solicita redefinicao de senha. Envia email com link se a conta existir.
+    Sempre retorna 200 para nao revelar se o email esta cadastrado.
+    """
+    _validate_email(body.email)
+    user = get_user_by_email(body.email.strip().lower())
+    if user:
+        reset_token = create_password_reset_token(str(user.id))
+        frontend_url = get_settings().frontend_url.rstrip("/")
+        reset_url = f"{frontend_url}/auth/v2/redefinir-senha?token={reset_token}"
+        _, ip_address = _client_info(request)
+        email_svc = EmailService(db)
+        email_svc.send_password_reset(
+            to_email=user.email,
+            reset_url=reset_url,
+            user_name=getattr(user, "name", None),
+            ip_address=ip_address,
+        )
+    # Always return success to avoid email enumeration
+    return {"message": "Se o email estiver cadastrado, você receberá um link para redefinir sua senha."}
+
+
+@router.post("/reset-password")
+def reset_password(
+    body: ResetPasswordBody,
+    request: Request,
+) -> dict:
+    """
+    Redefine a senha usando o token enviado por email.
+    Invalida o token, atualiza a senha e revoga todas as sessoes.
+    """
+    user_id = get_user_id_by_reset_token(body.token.strip())
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Link inválido ou expirado. Solicite um novo email de redefinição.",
+        )
+    new_hash = hash_password(body.new_password)
+    update_user_password(user_id, new_hash)
+    revoke_all_sessions_for_user(user_id)
+    delete_reset_token(body.token.strip())
+    return {"message": "Senha redefinida com sucesso! Faça login com sua nova senha."}
 
 class UpdateMeBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
