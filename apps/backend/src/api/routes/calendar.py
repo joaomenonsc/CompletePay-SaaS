@@ -12,7 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from src.api.deps import require_organization_id
+from src.api.deps import require_organization_id, require_org_role
 from src.api.middleware.auth import require_user_id
 from src.db.models import AgentConfig
 from src.db.models_calendar import (
@@ -118,6 +118,7 @@ def create_event_type(
     body: EventTypeCreate,
     user_id: str = Depends(require_user_id),
     organization_id: str = Depends(require_organization_id),
+    _role: str = Depends(require_org_role(["gcl", "med", "enf"])),  # SBP-009
     db: Session = Depends(get_db),
 ):
     """Cria um novo tipo de evento."""
@@ -229,6 +230,7 @@ def update_event_type(
     body: EventTypeUpdate,
     user_id: str = Depends(require_user_id),
     organization_id: str = Depends(require_organization_id),
+    _role: str = Depends(require_org_role(["gcl", "med", "enf"])),  # SBP-009
     db: Session = Depends(get_db),
 ):
     """Atualiza campos parciais do event type."""
@@ -288,6 +290,7 @@ def delete_event_type(
     event_type_id: str,
     user_id: str = Depends(require_user_id),
     organization_id: str = Depends(require_organization_id),
+    _role: str = Depends(require_org_role(["gcl"])),  # SBP-009: somente gestor
     db: Session = Depends(get_db),
 ):
     """Exclui um event type."""
@@ -1124,6 +1127,7 @@ def create_webhook(
     body: WebhookCreate,
     user_id: str = Depends(require_user_id),
     organization_id: str = Depends(require_organization_id),
+    _role: str = Depends(require_org_role(["gcl"])),  # SBP-009: somente gestor
     db: Session = Depends(get_db),
 ):
     """Cria webhook para um tipo de evento."""
@@ -1168,6 +1172,7 @@ def delete_webhook(
     webhook_id: str,
     user_id: str = Depends(require_user_id),
     organization_id: str = Depends(require_organization_id),
+    _role: str = Depends(require_org_role(["gcl"])),  # SBP-009: somente gestor
     db: Session = Depends(get_db),
 ):
     """Exclui um webhook."""

@@ -6,6 +6,7 @@ Endpoints:
     GET  /api/v1/email-marketing/unsubscribe       — Exibe página de confirmação de descadastro
     POST /api/v1/email-marketing/unsubscribe       — Processa o descadastro
 """
+import html as html_escape_mod
 import logging
 from datetime import datetime, timezone
 
@@ -14,7 +15,6 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 
 from src.db.models_marketing import EmkCampaign, EmkSubscriber, EmkInboundEmail, EmkDomain
-from src.db.session import SessionLocal
 from src.db.session import SessionLocal
 from src.services.unsubscribe_service import verify_unsubscribe_token
 
@@ -45,18 +45,26 @@ async def receive_resend_webhook(request: Request):
     body = await request.body()
     payload = await request.json()
 
-    # Verificar assinatura (svix)
+    # SBP-002: verificar assinatura usando secret do SERVIDOR (nunca do header do cliente)
+    from src.config.settings import get_settings
+    _settings = get_settings()
+    _webhook_secret = getattr(_settings, 'resend_webhook_secret', '') or ''
     svix_signature = request.headers.get("svix-signature", "")
-    if svix_signature:
+
+    if _settings.app_env == "production" and not svix_signature:
+        logger.warning("Webhook sem assinatura rejeitado em produção")
+        raise HTTPException(status_code=401, detail="Webhook signature required")
+
+    if svix_signature and _webhook_secret:
         try:
             from src.services.esp_adapter import get_esp_adapter
             adapter = get_esp_adapter()
-            webhook_secret = request.headers.get("svix-secret", "")
-            if webhook_secret and not adapter.verify_webhook(body, svix_signature, webhook_secret):
+            if not adapter.verify_webhook(body, svix_signature, _webhook_secret):
                 logger.warning("Webhook signature verification failed")
                 raise HTTPException(status_code=401, detail="Invalid webhook signature")
         except ImportError:
-            pass  # svix não instalado — aceitar em dev
+            if _settings.app_env == "production":
+                raise HTTPException(status_code=500, detail="Webhook verification unavailable")
 
     # Extrair tipo de evento
     event_type_raw = payload.get("type", "")
@@ -96,9 +104,6 @@ async def receive_resend_webhook(request: Request):
     return {"status": "ok", "event": mapped_type}
 
 
-    return {"status": "ok", "event": mapped_type}
-
-
 # ── Webhook Inbound (Recebimento de Emails) ────────────────────────────────────
 
 
@@ -111,18 +116,26 @@ async def receive_inbound_webhook(request: Request):
     body = await request.body()
     payload = await request.json()
 
-    # Verificar assinatura (svix)
+    # SBP-002: verificar assinatura usando secret do SERVIDOR
+    from src.config.settings import get_settings
+    _settings = get_settings()
+    _webhook_secret = getattr(_settings, 'resend_webhook_secret', '') or ''
     svix_signature = request.headers.get("svix-signature", "")
-    if svix_signature:
+
+    if _settings.app_env == "production" and not svix_signature:
+        logger.warning("Inbound Webhook sem assinatura rejeitado em produção")
+        raise HTTPException(status_code=401, detail="Webhook signature required")
+
+    if svix_signature and _webhook_secret:
         try:
             from src.services.esp_adapter import get_esp_adapter
             adapter = get_esp_adapter()
-            webhook_secret = request.headers.get("svix-secret", "")
-            if webhook_secret and not adapter.verify_webhook(body, svix_signature, webhook_secret):
+            if not adapter.verify_webhook(body, svix_signature, _webhook_secret):
                 logger.warning("Inbound Webhook signature verification failed")
                 raise HTTPException(status_code=401, detail="Invalid webhook signature")
         except ImportError:
-            pass  # svix não instalado — aceitar em dev
+            if _settings.app_env == "production":
+                raise HTTPException(status_code=500, detail="Webhook verification unavailable")
 
     # O Resend envia um formato específico para Inbound
     # ex: payload pode direto ser o objeto ou vir dentro de "data" dependendo da config
@@ -346,7 +359,11 @@ async def unsubscribe_confirm_page(
     if not verify_unsubscribe_token(sid, cid, token):
         return HTMLResponse(content=_UNSUB_ERROR_HTML, status_code=403)
 
-    html = _UNSUB_CONFIRM_HTML.replace("{sid}", sid).replace("{cid}", cid).replace("{token}", token)
+    # SBP-013: escapar parâmetros para prevenir XSS
+    safe_sid = html_escape_mod.escape(sid)
+    safe_cid = html_escape_mod.escape(cid)
+    safe_token = html_escape_mod.escape(token)
+    html = _UNSUB_CONFIRM_HTML.replace("{sid}", safe_sid).replace("{cid}", safe_cid).replace("{token}", safe_token)
     return HTMLResponse(content=html)
 
 

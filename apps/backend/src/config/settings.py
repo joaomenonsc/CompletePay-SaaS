@@ -1,6 +1,11 @@
 """Settings com pydantic-settings (carregamento de .env)."""
-from pydantic import Field
+import logging
+import sys
+
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_settings_logger = logging.getLogger("completepay.settings")
 
 
 class Settings(BaseSettings):
@@ -13,12 +18,30 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     # "json" = structured logging (uma linha JSON por evento); vazio = formato legível para dev
     log_format: str = ""
-    database_url: str = "postgresql://agent:password@localhost:5432/completepay_agent"
+    # SBP-015: default sem credenciais embutidas no código
+    database_url: str = "postgresql://localhost:5432/completepay_agent"
     redis_url: str = "redis://localhost:6379"
     high_value_threshold: float = 10000.0
     mcp_server_url: str | None = None
     jwt_secret: str = "change-me-in-production"
+
+    # SBP-002: secret de webhook armazenado no servidor (nunca do header do cliente)
+    resend_webhook_secret: str = Field(default="", validation_alias="RESEND_WEBHOOK_SECRET")
+
+    @model_validator(mode="after")
+    def _check_production_secrets(self) -> "Settings":
+        """SBP-010: abortar startup se JWT secret for fraco em produção."""
+        if self.app_env == "production":
+            if self.jwt_secret in ("change-me-in-production", "") or len(self.jwt_secret) < 32:
+                _settings_logger.critical(
+                    "FATAL: JWT_SECRET é fraco ou default em produção. "
+                    "Defina JWT_SECRET com pelo menos 32 caracteres."
+                )
+                sys.exit(1)
+        return self
     api_rate_limit: int = 100  # requests per minute per client
+    # SBP-012: IPs de proxies confiáveis (separados por vírgula) para X-Forwarded-For
+    trusted_proxy_ips: str = Field(default="", validation_alias="TRUSTED_PROXY_IPS")
     # CORS: origens permitidas separadas por virgula (ex: http://localhost:3000,http://localhost:3003)
     cors_origins: str = "http://localhost:3000,http://localhost:3003"
     # Email (Resend) - modulo calendario. Variaveis: RESEND_API_KEY, EMAIL_FROM_ADDRESS, EMAIL_FROM_NAME

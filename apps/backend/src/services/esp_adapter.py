@@ -49,6 +49,7 @@ class ESPAdapter(ABC):
         subject: str,
         html: str,
         headers: dict[str, str] | None = None,
+        text: str | None = None,
     ) -> SendResult:
         """Envia um unico email. Retorna SendResult."""
         ...
@@ -114,6 +115,7 @@ class ResendAdapter(ESPAdapter):
         subject: str,
         html: str,
         headers: dict[str, str] | None = None,
+        text: str | None = None,
     ) -> SendResult:
         self._throttle()
         try:
@@ -125,6 +127,8 @@ class ResendAdapter(ESPAdapter):
             }
             if headers:
                 params["headers"] = headers
+            if text:
+                params["text"] = text
             result = self._resend.Emails.send(params)
             msg_id = result.get("id") if isinstance(result, dict) else str(result)
             return SendResult(success=True, message_id=msg_id)
@@ -176,8 +180,8 @@ class ResendAdapter(ESPAdapter):
             wh.verify(payload, {"svix-signature": signature})
             return True
         except ImportError:
-            logger.warning("svix not installed — webhook verification skipped")
-            return True  # Fail-open em dev sem svix
+            logger.warning("svix not installed — webhook verification FAILED (fail-closed)")
+            return False  # SBP-002: fail-closed — nunca aceitar sem verificação
         except Exception:
             return False
 
@@ -195,6 +199,7 @@ class LogAdapter(ESPAdapter):
         subject: str,
         html: str,
         headers: dict[str, str] | None = None,
+        text: str | None = None,
     ) -> SendResult:
         logger.info(
             "[LogAdapter] send_single from=%s to=%s subject=%s (not sent)",

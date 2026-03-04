@@ -162,9 +162,9 @@ def calendar_auth_seed(db_session, calendar_public_seed):
     yield {
         "auth_headers": {
             "Authorization": f"Bearer {token}",
-            "X-Organization-Id": org_id,
+            "X-Organization-Id": str(org_id),
         },
-        "org_id": org_id,
+        "org_id": str(org_id),
         "user_id": TEST_USER_ID,
         **calendar_public_seed,
     }

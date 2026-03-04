@@ -17,12 +17,15 @@ def override_require_org_role():
         return "med"
     return _require_role
 
-from src.api.middleware.auth import require_user_id
-from src.api.deps import require_organization_id, require_org_role
-
-app.dependency_overrides[require_user_id] = override_require_user_id
-app.dependency_overrides[require_organization_id] = override_require_organization_id
-app.dependency_overrides[require_org_role] = override_require_org_role
+@pytest.fixture(autouse=True)
+def mock_auth():
+    from src.api.middleware.auth import require_user_id
+    from src.api.deps import require_organization_id, require_org_role
+    app.dependency_overrides[require_user_id] = override_require_user_id
+    app.dependency_overrides[require_organization_id] = override_require_organization_id
+    app.dependency_overrides[require_org_role] = override_require_org_role
+    yield
+    app.dependency_overrides.clear()
 
 def test_pdf_service_can_be_imported():
     # Simple check that we can import reportlab without errors

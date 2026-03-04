@@ -33,6 +33,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.limit = requests_per_minute or settings.api_rate_limit
         self.period = 60  # 1 minuto
 
+        # SBP-012: somente confiar em X-Forwarded-For de proxies conhecidos
+        _proxies = getattr(settings, "trusted_proxy_ips", "") or ""
+        self._trusted_proxies: set[str] = {
+            ip.strip() for ip in _proxies.split(",") if ip.strip()
+        }
+
         # Redis como backend principal
         self._redis: redis.Redis | None = None
         try:
@@ -47,10 +53,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._requests: dict[str, list[float]] = defaultdict(list)
 
     def _get_client_key(self, request: Request) -> str:
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
+        # SBP-012: somente confiar em X-Forwarded-For se vier de proxy confiável
+        client_ip = request.client.host if request.client else "unknown"
+        if self._trusted_proxies and client_ip in self._trusted_proxies:
+            forwarded = request.headers.get("x-forwarded-for")
+            if forwarded:
+                return forwarded.split(",")[0].strip()
+        return client_ip
 
     def _get_rate_limit_key(self, request: Request) -> str:
         """Chave do rate limit: por usuario quando autenticado, senao por IP."""

@@ -27,13 +27,15 @@ PUBLIC_ROUTES = [
     ("POST", "/auth/login"),
     ("POST", "/auth/confirm-email"),
     ("POST", "/auth/resend-confirmation"),
+    ("POST", "/auth/forgot-password"),
+    ("POST", "/auth/reset-password"),
     ("GET", "/"),
     ("GET", "/docs"),
     ("GET", "/redoc"),
     ("GET", "/openapi.json"),
     ("GET", "/api/v1/public/calendar"),
     ("POST", "/api/v1/public/calendar"),
-    ("GET", "/uploads"),  # avatares e outros arquivos estaticos publicos
+    ("GET", "/uploads/avatars"),  # SBP-001: somente avatares publicos
     ("POST", "/api/v1/automations/webhooks/"),  # webhook de automações (autenticação por secret)
     ("POST", "/api/v1/email-marketing/webhooks/resend"),
     ("POST", "/api/v1/email-marketing/webhooks/inbound"),

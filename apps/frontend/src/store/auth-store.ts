@@ -9,8 +9,11 @@ const AUTH_COOKIE_MAX_AGE_DAYS = 1; // 24h alinhado ao JWT do backend
 function setAuthCookie(token: string) {
   if (typeof document === "undefined") return;
   const maxAge = AUTH_COOKIE_MAX_AGE_DAYS * 24 * 60 * 60;
+  // SBP-005: Secure + SameSite=Strict para proteger contra CSRF e interceptação
+  const isSecure = typeof window !== "undefined" && window.location.protocol === "https:";
+  const secureFlag = isSecure ? "; Secure" : "";
   // biome-ignore lint/suspicious/noDocumentCookie: Cookie Store API not used for broad compatibility
-  document.cookie = `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}; path=/; max-age=${maxAge}; SameSite=Lax`;
+  document.cookie = `${AUTH_COOKIE_NAME}=${encodeURIComponent(token)}; path=/; max-age=${maxAge}; SameSite=Strict${secureFlag}`;
 }
 
 function clearAuthCookie() {

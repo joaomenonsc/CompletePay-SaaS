@@ -193,7 +193,7 @@ class TestScheduledCampaignsChecker:
             mock_send.return_value = {"sent": 0, "total": 0}
 
             with patch("src.workers.tasks.SessionLocal", return_value=db):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     task_check_scheduled_campaigns(ctx)
                 )
 
@@ -208,7 +208,7 @@ class TestScheduledCampaignsChecker:
         from src.workers.tasks import task_check_scheduled_campaigns
 
         with patch("src.workers.tasks.SessionLocal", return_value=db):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 task_check_scheduled_campaigns({})
             )
 

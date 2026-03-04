@@ -1,6 +1,8 @@
 """Service de automações — lógica de negócio desacoplada de HTTP."""
+import ast
 import hashlib
 import hmac
+import ipaddress
 import logging
 import re
 import secrets
@@ -8,6 +10,7 @@ import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -243,10 +246,10 @@ def _ensure_webhook_endpoints(
             )
             db.add(endpoint)
             db.flush()
-            # Logar o secret apenas na criação (para o admin copiar)
+            # SBP-007: nunca logar secret bruto; exibir apenas fingerprint parcial
             logger.info(
-                "Webhook endpoint criado: slug=%s secret=%s (anote este secret, não será exibido novamente)",
-                path_slug, raw_secret,
+                "Webhook endpoint criado: slug=%s secret_fingerprint=%s... (entregue o secret completo ao admin por canal seguro)",
+                path_slug, raw_secret[:8],
             )
 
 
@@ -627,6 +630,30 @@ def _resolve_config(config: dict, context: dict) -> dict:
     return resolved
 
 
+def _validate_url_ssrf(url: str) -> None:
+    """SBP-004: Valida URL contra SSRF — bloqueia ranges privados e protocolos perigosos."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Protocolo não permitido: {parsed.scheme}")
+    hostname = parsed.hostname or ""
+    if not hostname:
+        raise ValueError("URL sem hostname")
+    # Bloquear hostnames perigosos
+    blocked_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "metadata.google.internal"}
+    if hostname.lower() in blocked_hosts:
+        raise ValueError(f"Hostname bloqueado: {hostname}")
+    # Bloquear IPs privados/reservados
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_reserved or ip.is_loopback or ip.is_link_local:
+            raise ValueError(f"IP privado/reservado bloqueado: {hostname}")
+    except ValueError as e:
+        if "bloqueado" in str(e):
+            raise
+        # Não é um IP, é um hostname — ok, verificar se resolve para IP privado
+        pass
+
+
 def _execute_http_request(config: dict) -> dict[str, Any]:
     """Executa HTTP request usando httpx."""
     try:
@@ -640,6 +667,9 @@ def _execute_http_request(config: dict) -> dict[str, Any]:
     headers = config.get("headers", {})
     body_template = config.get("body_template", {})
     timeout_s = config.get("timeout_s", 30)
+
+    # SBP-004: validar URL antes de enviar request
+    _validate_url_ssrf(url)
 
     try:
         with httpx.Client(timeout=timeout_s) as client:
@@ -743,17 +773,75 @@ def _execute_delay(config: dict) -> dict[str, Any]:
 
 
 def _execute_code_script(config: dict, context: dict) -> dict[str, Any]:
-    """Executa expressão Python simples (sandbox limitado, sem IO)."""
+    """
+    SBP-003: Executa expressão Python segura via AST validation + compile/eval.
+    Apenas expressões são permitidas (não statements como import, exec, eval, etc.).
+    """
     code = config.get("code", "")
+
+    # Validar AST: somente expressões seguras
+    _FORBIDDEN_AST_NODES = (
+        ast.Import, ast.ImportFrom, ast.Delete, ast.Global, ast.Nonlocal,
+        ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef,
+        ast.Raise, ast.Try, ast.With, ast.AsyncWith,
+    )
+    try:
+        tree = ast.parse(code, mode="exec")
+    except SyntaxError as exc:
+        raise RuntimeError(f"CodeScript: syntax error: {exc}") from exc
+
+    for node in ast.walk(tree):
+        if isinstance(node, _FORBIDDEN_AST_NODES):
+            raise RuntimeError(
+                f"CodeScript: statement não permitido: {type(node).__name__}. "
+                "Use apenas expressões e assignments simples."
+            )
+        # Bloquear chamadas a funções perigosas
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in (
+                "exec", "eval", "compile", "__import__", "open",
+                "getattr", "setattr", "delattr", "globals", "locals",
+                "dir", "vars", "type", "exit", "quit",
+            ):
+                raise RuntimeError(
+                    f"CodeScript: chamada bloqueada: {node.func.id}()"
+                )
+        # Bloquear acesso a atributos dunder
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            raise RuntimeError(
+                f"CodeScript: acesso a atributo dunder bloqueado: {node.attr}"
+            )
+
     # Namespace restrito — só acessa variáveis do workflow
     safe_ns: dict[str, Any] = {
         "data": context.get("vars", {}),
         "trigger": context.get("trigger", {}),
         "nodes": context.get("nodes", {}),
         "result": None,
+        # Funções seguras permitidas
+        "len": len,
+        "str": str,
+        "int": int,
+        "float": float,
+        "bool": bool,
+        "list": list,
+        "dict": dict,
+        "min": min,
+        "max": max,
+        "sum": sum,
+        "abs": abs,
+        "round": round,
+        "sorted": sorted,
+        "enumerate": enumerate,
+        "zip": zip,
+        "map": map,
+        "filter": filter,
+        "range": range,
+        "isinstance": isinstance,
     }
     try:
-        exec(code, {"__builtins__": {}}, safe_ns)  # noqa: S102
+        compiled = compile(tree, "<CodeScript>", "exec")
+        exec(compiled, {"__builtins__": {}}, safe_ns)  # noqa: S102
     except Exception as exc:
         raise RuntimeError(f"CodeScript falhou: {exc}") from exc
 

@@ -28,6 +28,7 @@ from src.api.routes.ws_chat import router as ws_chat_router
 from src.api.routes.organizations import router as organizations_router
 from src.api.routes.automations import router as automations_router
 from src.api.routes.automations_webhook import webhook_router as automations_webhook_router
+from src.api.routes.document_routes import router as document_router
 from src.config.logging_config import setup_logging
 from src.config.sentry_config import init_sentry
 from src.config.settings import get_settings
@@ -47,10 +48,16 @@ setup_logging(
 )
 logger = logging.getLogger("completepay.api")
 
+# SBP-011: desabilitar docs/openapi em producao
+_is_prod = settings.app_env == "production"
+
 app = FastAPI(
     title="CompletePay Agent API",
     description="API do agente CompletePay (chat e health).",
     version="0.1.0",
+    docs_url=None if _is_prod else "/docs",
+    redoc_url=None if _is_prod else "/redoc",
+    openapi_url=None if _is_prod else "/openapi.json",
 )
 
 # CORS: permite requisicoes do frontend. Em producao use apenas dominio(s) do frontend (Fase 3.3).
@@ -62,12 +69,13 @@ if settings.app_env == "production" and origins:
         if "localhost" in o or o == "*":
             logger.warning("CORS em producao: evite localhost ou *; use apenas o dominio do frontend.")
             break
+# SBP-014: restringir metodos e headers (evitar wildcard)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Organization-Id", "X-Request-ID"],
 )
 
 # Ordem: primeiro adicionado = primeiro a executar.
@@ -92,11 +100,14 @@ app.include_router(chat_router)
 app.include_router(ws_chat_router)
 app.include_router(automations_router)
 app.include_router(automations_webhook_router)
+app.include_router(document_router)  # SBP-001: documentos via endpoint autenticado
 
-# Servir arquivos de upload (ex.: avatares em /uploads/avatars/...)
-_uploads_dir = Path(__file__).resolve().parent.parent.parent / "uploads"
-_uploads_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
+# SBP-001: servir APENAS uploads publicos (avatares).
+# Documentos clinicos devem ser acessados via endpoint autenticado (document_routes).
+_uploads_base = Path(__file__).resolve().parent.parent.parent / "uploads"
+_public_uploads_dir = _uploads_base / "avatars"
+_public_uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads/avatars", StaticFiles(directory=str(_public_uploads_dir)), name="uploads_avatars")
 
 # --- Observabilidade (Onda 3) ---
 
