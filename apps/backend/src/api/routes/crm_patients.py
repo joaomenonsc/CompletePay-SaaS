@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from src.api.deps import require_organization_id, require_org_role
 from src.api.middleware.auth import require_user_id
+from src.cache import cache_get_sync, cache_set_sync, cache_invalidate_prefix_sync, make_cache_key
 from src.db.models_crm import Patient, PatientConsent, PatientDocument, PatientGuardian, PatientInsurance
 from src.db.session import get_db
 from src.schemas.crm import (
@@ -69,6 +70,10 @@ def list_patients(
     q: str | None = Query(None, description="Busca por nome, CPF, telefone ou data (YYYY-MM-DD)"),
 ):
     """Lista pacientes com paginacao. q busca em nome, CPF, telefone ou data de nascimento."""
+    cache_key = make_cache_key("crm:patients", organization_id, q=q or "", limit=limit, offset=offset)
+    if cached := cache_get_sync(cache_key):
+        return cached
+
     base = select(Patient).where(Patient.organization_id == organization_id)
     if q and q.strip():
         term = q.strip()
@@ -106,12 +111,14 @@ def list_patients(
         .all()
     )
     patients = rows  # .scalars().all() já retorna list[Patient]
-    return PatientListResponse(
+    result = PatientListResponse(
         items=[PatientListItemResponse.model_validate(p) for p in patients],
         total=total,
         limit=limit,
         offset=offset,
     )
+    cache_set_sync(cache_key, result.model_dump(mode="json"), ttl=60)
+    return result
 
 
 @router.get("/check-duplicate", response_model=list[PatientListItemResponse])
@@ -198,6 +205,7 @@ def create_patient(
     db.add(patient)
     db.commit()
     db.refresh(patient)
+    cache_invalidate_prefix_sync(f"crm:patients:{organization_id}")
     log_audit(
         db,
         organization_id=organization_id,
@@ -280,6 +288,7 @@ def update_patient(
         setattr(patient, k, v)
     db.commit()
     db.refresh(patient)
+    cache_invalidate_prefix_sync(f"crm:patients:{organization_id}")
     log_audit(
         db,
         organization_id=organization_id,

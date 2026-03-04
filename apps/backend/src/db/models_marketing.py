@@ -281,3 +281,37 @@ class EmkDomain(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+# ── Emails Recebidos (Inbound) ──────────────────────────────────────────────
+
+
+class EmkInboundEmail(Base):
+    """Emails recebidos via Webhook Inbound (ex: respostas de clientes)."""
+    __tablename__ = "emk_inbound_emails"
+    __table_args__ = (
+        Index("ix_emk_inbound_emails_organization_id", "organization_id"),
+        Index("ix_emk_inbound_emails_status", "status"),
+        Index("ix_emk_inbound_emails_from_email", "from_email"),
+        Index("ix_emk_inbound_emails_to_email", "to_email"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid_str)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    from_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    from_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    to_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    subject: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    text_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    html_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="unread"
+    )  # unread, read, processed
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )

@@ -13,7 +13,8 @@ from fastapi import APIRouter, HTTPException, Request, Form
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 
-from src.db.models_marketing import EmkCampaign, EmkSubscriber
+from src.db.models_marketing import EmkCampaign, EmkSubscriber, EmkInboundEmail, EmkDomain
+from src.db.session import SessionLocal
 from src.db.session import SessionLocal
 from src.services.unsubscribe_service import verify_unsubscribe_token
 
@@ -95,8 +96,126 @@ async def receive_resend_webhook(request: Request):
     return {"status": "ok", "event": mapped_type}
 
 
-# ── Unsubscribe ────────────────────────────────────────────────────────────────
+    return {"status": "ok", "event": mapped_type}
 
+
+# ── Webhook Inbound (Recebimento de Emails) ────────────────────────────────────
+
+
+@router.post("/webhooks/inbound")
+async def receive_inbound_webhook(request: Request):
+    """
+    Recebe webhooks de Inbound do Resend (emails respondidos).
+    Salva no banco e dispara automações (InboundEmailTrigger).
+    """
+    body = await request.body()
+    payload = await request.json()
+
+    # Verificar assinatura (svix)
+    svix_signature = request.headers.get("svix-signature", "")
+    if svix_signature:
+        try:
+            from src.services.esp_adapter import get_esp_adapter
+            adapter = get_esp_adapter()
+            webhook_secret = request.headers.get("svix-secret", "")
+            if webhook_secret and not adapter.verify_webhook(body, svix_signature, webhook_secret):
+                logger.warning("Inbound Webhook signature verification failed")
+                raise HTTPException(status_code=401, detail="Invalid webhook signature")
+        except ImportError:
+            pass  # svix não instalado — aceitar em dev
+
+    # O Resend envia um formato específico para Inbound
+    # ex: payload pode direto ser o objeto ou vir dentro de "data" dependendo da config
+    data = payload.get("data", payload)
+
+    from_addr = data.get("from", "")
+    to_addr = data.get("to", [""])[0] if isinstance(data.get("to"), list) else data.get("to", "")
+    subject = data.get("subject", "")
+    text_content = data.get("text", "")
+    html_content = data.get("html", "")
+
+    if not to_addr or not from_addr:
+        logger.warning("Inbound Webhook missing 'to' or 'from' addresses")
+        return {"status": "ignored", "reason": "missing_addresses"}
+
+    # Extrair domínio do destinatário (ex: atendimento@app.completepay.digital -> app.completepay.digital)
+    to_domain = to_addr.split("@")[-1].lower() if "@" in to_addr else to_addr.lower()
+
+    db = SessionLocal()
+    try:
+        # Encontrar a organização dona do domínio
+        domain_record = db.execute(
+            select(EmkDomain).where(EmkDomain.domain == to_domain)
+        ).scalars().first()
+
+        if not domain_record:
+            logger.warning(f"Inbound Webhook received for unknown domain: {to_domain}")
+            return {"status": "ignored", "reason": "unknown_domain"}
+
+        org_id = domain_record.organization_id
+
+        # Salvar o email no banco
+        inbound_email = EmkInboundEmail(
+            organization_id=org_id,
+            from_email=from_addr,
+            to_email=to_addr,
+            subject=subject,
+            text_content=text_content,
+            html_content=html_content,
+            status="unread"
+        )
+        db.add(inbound_email)
+        db.commit()
+        db.refresh(inbound_email)
+        logger.info(f"Inbound email saved: {inbound_email.id} for org {org_id}")
+
+        # Auditoria
+        try:
+            from src.services.audit_service import log_audit
+            log_audit(
+                db,
+                organization_id=org_id,
+                user_id="system_webhook",
+                action="receive_inbound_email",
+                resource_type="emk_inbound_email",
+                resource_id=inbound_email.id,
+                data_classification="CLI",
+                data_after={
+                    "from": from_addr,
+                    "to": to_addr,
+                    "subject": subject
+                }
+            )
+        except Exception as audit_err:
+            logger.warning(f"Failed to log inbound email audit: {audit_err}")
+
+        # Disparar Automação
+        try:
+            from src.services.automation_service import trigger_execution_inbound_email
+            # Formatar payload para a automação
+            automation_payload = {
+                "inbound_email_id": inbound_email.id,
+                "from": from_addr,
+                "to": to_addr,
+                "subject": subject,
+                "text": text_content,
+                "html": html_content
+            }
+            triggered = trigger_execution_inbound_email(db, org_id, automation_payload)
+            logger.info(f"Triggered {triggered} automations for inbound email {inbound_email.id}")
+        except Exception as auto_err:
+            logger.error(f"Failed to trigger automations: {auto_err}")
+
+    except Exception as e:
+        logger.error(f"Inbound Webhook processing error: {e}")
+        return {"status": "error", "message": str(e)[:200]}
+    finally:
+        db.close()
+
+    return {"status": "ok"}
+
+
+# ── Unsubscribe ────────────────────────────────────────────────────────────────
 
 _UNSUB_CONFIRM_HTML = """<!DOCTYPE html>
 <html lang="pt-BR">

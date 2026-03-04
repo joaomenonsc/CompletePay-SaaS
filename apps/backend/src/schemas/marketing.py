@@ -283,3 +283,40 @@ class DomainListResponse(BaseModel):
     limit: int
     offset: int
 
+
+# ── Inbound Emails ───────────────────────────────────────────────────────────
+
+
+class InboundEmailResponse(BaseModel):
+    """Resposta para consulta de emails inbound."""
+    id: str
+    organization_id: str
+    from_email: str
+    from_name: Optional[str] = None
+    to_email: str
+    subject: Optional[str] = None
+    text_content: Optional[str] = None
+    html_content: Optional[str] = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InboundEmailListResponse(BaseModel):
+    """Lista de emails inbound."""
+    items: list[InboundEmailResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class SingleEmailRequest(BaseModel):
+    """Payload para envio de email unico."""
+    to_email: str = Field(..., max_length=255)
+    subject: str = Field(..., min_length=2, max_length=500)
+    html_content: Optional[str] = None
+    text_content: Optional[str] = None
+    from_name: Optional[str] = Field(None, max_length=255)
+    from_email: Optional[str] = Field(None, max_length=255)
+

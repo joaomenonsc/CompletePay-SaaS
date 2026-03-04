@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from src.api.deps import require_organization_id, require_org_role
 from src.api.middleware.auth import require_user_id
+from src.cache import cache_get_sync, cache_set_sync, cache_invalidate_prefix_sync, make_cache_key
 from src.db.models_calendar import Booking, BookingStatus, EventType
 from src.db.models_crm import Appointment, HealthProfessional, Patient
 from src.db.session import get_db
@@ -104,6 +105,14 @@ def list_appointments(
     date_to: Optional[date] = Query(None, description="Data final (inclusive)"),
 ):
     """Lista agendamentos com filtros e paginacao."""
+    cache_key = make_cache_key(
+        "crm:appointments", organization_id,
+        patient_id=patient_id or "", professional_id=professional_id or "",
+        date_from=str(date_from), date_to=str(date_to), limit=limit, offset=offset,
+    )
+    if cached := cache_get_sync(cache_key):
+        return cached
+
     conditions = _base_filters(organization_id, patient_id, professional_id, date_from, date_to)
     total = db.execute(select(func.count()).select_from(Appointment).where(*conditions)).scalar() or 0
     rows = (
@@ -139,7 +148,9 @@ def list_appointments(
         )
         for r in rows
     ]
-    return AppointmentListResponse(items=items, total=total, limit=limit, offset=offset)
+    result = AppointmentListResponse(items=items, total=total, limit=limit, offset=offset)
+    cache_set_sync(cache_key, result.model_dump(mode="json"), ttl=30)
+    return result
 
 
 @router.get("/{appointment_id}", response_model=AppointmentResponse)
@@ -220,6 +231,9 @@ def create_appointment(
     db.add(appointment)
     db.commit()
     db.refresh(appointment)
+    # Invalida cache de agendamentos e dashboard financeiro
+    cache_invalidate_prefix_sync(f"crm:appointments:{organization_id}")
+    cache_invalidate_prefix_sync(f"crm:financial:dashboard:{organization_id}")
     logger.info("Appointment criado: %s (booking=%s)", appointment.id, booking.id)
     return AppointmentResponse.model_validate(appointment)
 
@@ -283,6 +297,9 @@ def update_appointment_status(
 
     db.commit()
     db.refresh(appointment)
+    # Invalida cache de agendamentos e dashboard financeiro
+    cache_invalidate_prefix_sync(f"crm:appointments:{organization_id}")
+    cache_invalidate_prefix_sync(f"crm:financial:dashboard:{organization_id}")
     logger.info("Appointment %s status -> %s", appointment_id, new_status)
     return AppointmentResponse.model_validate(appointment)
 
@@ -361,6 +378,9 @@ def reschedule_appointment(
     appointment.status = "cancelado"
     db.commit()
     db.refresh(new_appointment)
+    # Invalida cache de agendamentos e dashboard financeiro
+    cache_invalidate_prefix_sync(f"crm:appointments:{organization_id}")
+    cache_invalidate_prefix_sync(f"crm:financial:dashboard:{organization_id}")
 
     cancel_booking_by_host(
         db, old_booking_id, organization_id, reason="Remarcado para novo horario."

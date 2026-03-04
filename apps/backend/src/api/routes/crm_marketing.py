@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from src.api.deps import require_organization_id, require_org_role
 from src.api.middleware.auth import require_user_id
+from src.cache import cache_get_sync, cache_set_sync, cache_invalidate_prefix_sync, make_cache_key
 from src.db.models_marketing import (
     EmkCampaign,
     EmkDomain,
@@ -46,6 +47,7 @@ from src.schemas.marketing import (
     TemplatePreviewResponse,
     TemplateResponse,
     TemplateUpdate,
+    SingleEmailRequest,
 )
 from src.services.audit_service import log_audit
 
@@ -144,6 +146,9 @@ def list_templates(
     category: str | None = Query(None, description="Filtrar por categoria"),
 ):
     """Lista templates da organizacao (paginado)."""
+    cache_key = make_cache_key("emk:templates", organization_id, q=q or "", category=category or "", limit=limit, offset=offset)
+    if cached := cache_get_sync(cache_key):
+        return cached
     base = select(EmkTemplate).where(EmkTemplate.organization_id == organization_id)
     if q and q.strip():
         base = base.where(EmkTemplate.name.ilike(f"%{q.strip()}%"))
@@ -151,10 +156,12 @@ def list_templates(
         base = base.where(EmkTemplate.category == category.strip())
     total = db.execute(select(func.count()).select_from(base.subquery())).scalar() or 0
     rows = db.execute(base.order_by(EmkTemplate.updated_at.desc()).limit(limit).offset(offset)).scalars().all()
-    return TemplateListResponse(
+    result = TemplateListResponse(
         items=[TemplateResponse.model_validate(t) for t in rows],
         total=total, limit=limit, offset=offset,
     )
+    cache_set_sync(cache_key, result.model_dump(mode="json"), ttl=120)
+    return result
 
 
 @router.post("/templates", response_model=TemplateResponse, status_code=201)
@@ -190,6 +197,7 @@ def create_template(
     db.add(template)
     db.commit()
     db.refresh(template)
+    cache_invalidate_prefix_sync(f"emk:templates:{organization_id}")
     log_audit(
         db, organization_id=organization_id, user_id=user_id,
         action="create", resource_type="emk_template", resource_id=template.id,
@@ -239,6 +247,7 @@ def update_template(
         setattr(template, k, v)
     db.commit()
     db.refresh(template)
+    cache_invalidate_prefix_sync(f"emk:templates:{organization_id}")
     return TemplateResponse.model_validate(template)
 
 
@@ -254,6 +263,7 @@ def delete_template(
     template = _get_template_or_404(db, template_id, organization_id)
     db.delete(template)
     db.commit()
+    cache_invalidate_prefix_sync(f"emk:templates:{organization_id}")
     return None
 
 
@@ -350,6 +360,7 @@ def create_campaign(
     db.add(campaign)
     db.commit()
     db.refresh(campaign)
+    cache_invalidate_prefix_sync(f"emk:analytics:{organization_id}")
     log_audit(
         db, organization_id=organization_id, user_id=user_id,
         action="create", resource_type="emk_campaign", resource_id=campaign.id,
@@ -404,6 +415,7 @@ def update_campaign(
         setattr(campaign, k, v)
     db.commit()
     db.refresh(campaign)
+    cache_invalidate_prefix_sync(f"emk:analytics:{organization_id}")
     return CampaignResponse.model_validate(campaign)
 
 
@@ -528,6 +540,7 @@ def delete_campaign(
         raise HTTPException(status_code=400, detail="Apenas campanhas em rascunho ou agendadas podem ser removidas.")
     db.delete(campaign)
     db.commit()
+    cache_invalidate_prefix_sync(f"emk:analytics:{organization_id}")
     log_audit(
         db, organization_id=organization_id, user_id=user_id,
         action="delete", resource_type="emk_campaign", resource_id=campaign_id,
@@ -615,15 +628,20 @@ def list_lists(
     q: str | None = Query(None, description="Busca por nome"),
 ):
     """Lista listas de destinatarios."""
+    cache_key = make_cache_key("emk:lists", organization_id, q=q or "", limit=limit, offset=offset)
+    if cached := cache_get_sync(cache_key):
+        return cached
     base = select(EmkList).where(EmkList.organization_id == organization_id)
     if q and q.strip():
         base = base.where(EmkList.name.ilike(f"%{q.strip()}%"))
     total = db.execute(select(func.count()).select_from(base.subquery())).scalar() or 0
     rows = db.execute(base.order_by(EmkList.updated_at.desc()).limit(limit).offset(offset)).scalars().all()
-    return ListListResponse(
+    result = ListListResponse(
         items=[ListResponse.model_validate(l) for l in rows],
         total=total, limit=limit, offset=offset,
     )
+    cache_set_sync(cache_key, result.model_dump(mode="json"), ttl=120)
+    return result
 
 
 @router.post("/lists", response_model=ListResponse, status_code=201)
@@ -646,6 +664,7 @@ def create_list(
     db.add(lst)
     db.commit()
     db.refresh(lst)
+    cache_invalidate_prefix_sync(f"emk:lists:{organization_id}")
     log_audit(
         db, organization_id=organization_id, user_id=user_id,
         action="create", resource_type="emk_list", resource_id=lst.id,
@@ -908,6 +927,10 @@ def get_overview_metrics(
     db: Session = Depends(get_db),
 ):
     """Metricas globais do modulo de marketing."""
+    cache_key = f"emk:analytics:{organization_id}:overview"
+    if cached := cache_get_sync(cache_key):
+        return cached
+
     base = select(EmkCampaign).where(EmkCampaign.organization_id == organization_id)
     total_campaigns = db.execute(select(func.count()).select_from(base.subquery())).scalar() or 0
 
@@ -926,7 +949,7 @@ def get_overview_metrics(
         base.order_by(EmkCampaign.created_at.desc()).limit(5)
     ).scalars().all()
 
-    return OverviewMetricsResponse(
+    result = OverviewMetricsResponse(
         total_campaigns=total_campaigns,
         total_sent=total_sent,
         avg_open_rate=round(total_opened / total_delivered * 100, 2) if total_delivered else 0,
@@ -934,6 +957,8 @@ def get_overview_metrics(
         avg_bounce_rate=round(total_bounced / total_sent * 100, 2) if total_sent else 0,
         recent_campaigns=[CampaignResponse.model_validate(c) for c in recent],
     )
+    cache_set_sync(cache_key, result.model_dump(mode="json"), ttl=120)
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1126,3 +1151,65 @@ def verify_domain(
         data_classification="ADM",
     )
     return DomainResponse.model_validate(domain)
+
+
+# ── Envio Avulso (Single Email) ──────────────────────────────────────────────
+
+
+@router.post("/send-single", status_code=200)
+def send_single_email(
+    body: SingleEmailRequest,
+    user_id: str = Depends(require_user_id),
+    organization_id: str = Depends(require_organization_id),
+    _role: str = Depends(require_org_role(ROLES_WRITE)),
+    db: Session = Depends(get_db),
+):
+    """
+    Envia um email transacional avulso.
+    Requer autenticação e permissões de marketing.
+    """
+    # Validar domínio do from_email se fornecido, caso contrário usa default da org
+    from_email = body.from_email
+    if from_email:
+        _validate_from_email_domain(db, from_email, organization_id)
+    else:
+        # Tentar pegar um domínio verificado da org
+        domain_obj = db.execute(
+            select(EmkDomain).where(
+                EmkDomain.organization_id == organization_id,
+                EmkDomain.status == "verified"
+            ).limit(1)
+        ).scalars().first()
+        
+        if domain_obj:
+            from_email = f"contato@{domain_obj.domain}"
+        else:
+            from src.config.settings import get_settings
+            settings = get_settings()
+            from_email = getattr(settings, "email_from_address", "noreply@completepay.com")
+
+    from_name = body.from_name or "CompletePay"
+    from_addr = f"{from_name} <{from_email}>"
+
+    from src.services.esp_adapter import get_esp_adapter
+    adapter = get_esp_adapter()
+    
+    result = adapter.send_single(
+        from_addr=from_addr,
+        to=body.to_email,
+        subject=body.subject,
+        html=body.html_content or "",
+        text=body.text_content
+    )
+    
+    if not result.success:
+        logger.error("Failed to send single email to %s: %s", body.to_email, result.error)
+        raise HTTPException(status_code=500, detail=f"Erro ao enviar email: {result.error}")
+        
+    log_audit(
+        db, organization_id=organization_id, user_id=user_id,
+        action="send_single", resource_type="emk_email", resource_id=body.to_email,
+        data_classification="ADM",
+    )
+    
+    return {"message": "Email enviado com sucesso", "esp_id": result.message_id}

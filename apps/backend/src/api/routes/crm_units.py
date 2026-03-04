@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from src.api.deps import require_organization_id, require_org_role
 from src.api.middleware.auth import require_user_id
+from src.cache import cache_get_sync, cache_set_sync, cache_invalidate_prefix_sync
 from src.db.models_crm import Room, Unit
 from src.db.session import get_db
 from src.schemas.crm import (
@@ -34,6 +35,9 @@ def list_units(
     db: Session = Depends(get_db),
 ):
     """Lista unidades da organizacao."""
+    cache_key = f"crm:units:{organization_id}:default"
+    if cached := cache_get_sync(cache_key):
+        return cached
     rows = (
         db.execute(
             select(Unit)
@@ -43,7 +47,9 @@ def list_units(
         .scalars()
         .all()
     )
-    return [UnitResponse.model_validate(u) for u in rows]
+    result = [UnitResponse.model_validate(u) for u in rows]
+    cache_set_sync(cache_key, [r.model_dump(mode="json") for r in result], ttl=600)
+    return result
 
 
 @router.post("", response_model=UnitResponse, status_code=201)
@@ -71,6 +77,7 @@ def create_unit(
     db.add(unit)
     db.commit()
     db.refresh(unit)
+    cache_invalidate_prefix_sync(f"crm:units:{organization_id}")
     return UnitResponse.model_validate(unit)
 
 
@@ -128,6 +135,7 @@ def update_unit(
         setattr(unit, k, v)
     db.commit()
     db.refresh(unit)
+    cache_invalidate_prefix_sync(f"crm:units:{organization_id}")
     return UnitResponse.model_validate(unit)
 
 

@@ -25,7 +25,7 @@ logger = logging.getLogger("completepay.automations")
 # ────────────────────────────────────────────────────────────────────────────
 
 VALID_NODE_TYPES = {
-    "trigger": ["ManualTrigger", "WebhookTrigger"],
+    "trigger": ["ManualTrigger", "WebhookTrigger", "InboundEmailTrigger"],
     "action":  ["HttpRequest", "SendEmail", "CreateCRMTask"],
     "logic":   ["IfCondition", "Delay"],
     "utils":   ["SetVariable", "Transform"],
@@ -1070,6 +1070,54 @@ def trigger_execution_webhook(
     execution = execute_workflow_sync(db, execution, version.definition_json, initial_context)
 
     return execution
+
+
+def trigger_execution_inbound_email(
+    db: Session,
+    organization_id: str,
+    payload: dict,
+) -> int:
+    """Dispara automações ativas com o trigger InboundEmailTrigger."""
+    # 1. Buscar workflows publicados da organização
+    # Observação: num cenário real, faríamos um parse no BD para buscar só quem tem o trigger.
+    # No MVP, iteramos os publicados.
+    workflows = db.query(AutomationWorkflow).filter(
+        AutomationWorkflow.organization_id == organization_id,
+        AutomationWorkflow.status == "PUBLISHED",
+    ).all()
+
+    triggered_count = 0
+    for wf in workflows:
+        version = db.query(AutomationWorkflowVersion).filter(
+            AutomationWorkflowVersion.id == wf.current_version_id,
+        ).first()
+
+        if not version:
+            continue
+
+        definition = version.definition_json or {}
+        nodes = definition.get("nodes", [])
+
+        # 2. Checar se tem InboundEmailTrigger
+        has_trigger = any(n.get("type") == "InboundEmailTrigger" for n in nodes)
+        if not has_trigger:
+            continue
+
+        # 3. Disparar
+        execution = AutomationExecution(
+            workflow_id=wf.id,
+            version_id=version.id,
+            status="RUNNING",
+            trigger_type="inbound_email",
+        )
+        db.add(execution)
+        db.flush()
+
+        initial_context = {"payload": payload, "source": "inbound_email_webhook"}
+        execute_workflow_sync(db, execution, definition, initial_context)
+        triggered_count += 1
+
+    return triggered_count
 
 
 # ────────────────────────────────────────────────────────────────────────────

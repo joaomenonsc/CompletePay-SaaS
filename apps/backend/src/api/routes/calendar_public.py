@@ -10,6 +10,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from src.auth.repository import get_user_by_id
+from src.cache import cache_get_sync, cache_set_sync, cache_invalidate_prefix_sync
 from src.db.models import AgentConfig, Organization
 from src.db.models_calendar import Booking, EventType
 from src.db.session import get_db, SessionLocal
@@ -61,6 +62,10 @@ def get_public_profile(
     Perfil publico do host (usuario ou agente).
     user_slug: UUID do user_id ou agent_config_id para filtrar event types do host.
     """
+    cache_key = f"calendar:profile:{org_slug}:{user_slug}"
+    if cached := cache_get_sync(cache_key):
+        return cached
+
     org = db.execute(
         select(Organization).where(Organization.slug == org_slug)
     ).scalars().one_or_none()
@@ -135,7 +140,7 @@ def get_public_profile(
             )
         )
 
-    return PublicProfileResponse(
+    response = PublicProfileResponse(
         host_name=host_name,
         host_type=host_type,
         avatar_url=avatar_url,
@@ -144,6 +149,8 @@ def get_public_profile(
         org_avatar_url=org.avatar_url,
         event_types=event_type_items,
     )
+    cache_set_sync(cache_key, response.model_dump(mode="json"), ttl=600)
+    return response
 
 
 @router.get(
@@ -158,6 +165,10 @@ def get_public_slots(
     db: Session = Depends(get_db),
 ):
     """Slots disponiveis para um tipo de evento (publico)."""
+    cache_key = f"calendar:slots:{org_slug}:{event_slug}:{month}:{timezone}"
+    if cached := cache_get_sync(cache_key):
+        return cached
+
     event_type = _resolve_event_type(db, org_slug, event_slug)
     year, month_num = map(int, month.split("-"))
     date_from = date(year, month_num, 1)
@@ -189,11 +200,13 @@ def get_public_slots(
     ]
 
     event_type_response = EventTypeResponse.from_orm_row(event_type)
-    return AvailableSlotsResponse(
+    response = AvailableSlotsResponse(
         event_type=event_type_response,
         timezone=timezone,
         days=days,
     )
+    cache_set_sync(cache_key, response.model_dump(mode="json"), ttl=30)
+    return response
 
 
 def _send_booking_emails_task(booking_id: str, base_url: str = "") -> None:
@@ -249,6 +262,10 @@ def post_public_booking(
     base_url = (get_settings().frontend_url or str(request.base_url)).rstrip("/")
     background_tasks.add_task(_send_booking_emails_task, str(booking.id), base_url)
     background_tasks.add_task(dispatch_webhooks_for_booking_task, str(booking.id), "booking.created")
+
+    # Invalida cache de slots do mês do booking
+    affected_month = booking.start_time.strftime("%Y-%m")
+    cache_invalidate_prefix_sync(f"calendar:slots:{body.event_slug if hasattr(body, 'event_slug') else ''}")
 
     event_type = db.execute(
         select(EventType).where(EventType.id == booking.event_type_id)
@@ -350,6 +367,19 @@ def post_public_booking_cancel(
     booking = cancel_booking_by_token(
         db, uid, body.cancel_token, reason=body.reason
     )
+    # Invalida cache de slots para o mês do booking cancelado
+    affected_month = booking.start_time.strftime("%Y-%m")
+    event_type = db.execute(
+        select(EventType).where(EventType.id == booking.event_type_id)
+    ).scalars().one_or_none()
+    if event_type:
+        org = db.execute(
+            select(Organization).where(Organization.id == event_type.organization_id)
+        ).scalars().one_or_none()
+        if org:
+            cache_invalidate_prefix_sync(
+                f"calendar:slots:{org.slug}:{event_type.slug}:{affected_month}"
+            )
     background_tasks.add_task(
         dispatch_webhooks_for_booking_task, str(booking.id), "booking.cancelled"
     )
@@ -380,6 +410,20 @@ def post_public_booking_reschedule(
         )
     except SlotConflictError as e:
         raise HTTPException(status_code=409, detail=e.message)
+
+    # Invalida cache de slots para o mês do booking remarcado
+    affected_month = booking.start_time.strftime("%Y-%m")
+    event_type_obj = db.execute(
+        select(EventType).where(EventType.id == booking.event_type_id)
+    ).scalars().one_or_none()
+    if event_type_obj:
+        org_obj = db.execute(
+            select(Organization).where(Organization.id == event_type_obj.organization_id)
+        ).scalars().one_or_none()
+        if org_obj:
+            cache_invalidate_prefix_sync(
+                f"calendar:slots:{org_obj.slug}:{event_type_obj.slug}:{affected_month}"
+            )
 
     background_tasks.add_task(
         dispatch_webhooks_for_booking_task, str(booking.id), "booking.rescheduled"

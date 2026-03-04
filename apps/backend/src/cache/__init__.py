@@ -49,7 +49,11 @@ async def cache_get(key: str) -> dict | list | None:
     """Busca valor no cache. Retorna None se não encontrado ou erro."""
     try:
         val = await _get_redis().get(key)
-        return json.loads(val) if val else None
+        if val:
+            logger.debug("cache hit: %s", key)
+            return json.loads(val)
+        logger.debug("cache miss: %s", key)
+        return None
     except Exception:
         logger.warning("cache_get falhou para key=%s", key)
         return None
@@ -82,8 +86,45 @@ async def cache_invalidate_prefix(prefix: str) -> None:
 
 
 def make_cache_key(prefix: str, org_id: str, **params) -> str:
-    """Gera key determinística a partir de parâmetros de query."""
-    suffix = hashlib.md5(
+    """Gera key determinística a partir de parâmetros de query (SHA-256, 12 chars)."""
+    suffix = hashlib.sha256(
         str(sorted(params.items())).encode()
-    ).hexdigest()[:8]
+    ).hexdigest()[:12]
     return f"{prefix}:{org_id}:{suffix}"
+
+
+# ─── Wrappers síncronos (para handlers `def` FastAPI) ────────────────────────
+# Usar em endpoints síncronos que não podem fazer `await`.
+
+def cache_get_sync(key: str) -> dict | list | None:
+    """Versão síncrona de cache_get. Usa asyncio.run()."""
+    import asyncio
+    try:
+        return asyncio.run(cache_get(key))
+    except RuntimeError:
+        # Já existe um event loop rodando (improvável em handler sync, mas seguro)
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, cache_get(key)).result()
+
+
+def cache_set_sync(key: str, value: dict | list, ttl: int = 60) -> None:
+    """Versão síncrona de cache_set. Usa asyncio.run()."""
+    import asyncio
+    try:
+        asyncio.run(cache_set(key, value, ttl))
+    except RuntimeError:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(asyncio.run, cache_set(key, value, ttl)).result()
+
+
+def cache_invalidate_prefix_sync(prefix: str) -> None:
+    """Versão síncrona de cache_invalidate_prefix. Usa asyncio.run()."""
+    import asyncio
+    try:
+        asyncio.run(cache_invalidate_prefix(prefix))
+    except RuntimeError:
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(asyncio.run, cache_invalidate_prefix(prefix)).result()

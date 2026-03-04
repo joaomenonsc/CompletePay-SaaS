@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from src.api.deps import require_org_role, require_organization_id, get_db
 from src.api.middleware.auth import require_user_id
+from src.cache import cache_get_sync, cache_set_sync, cache_invalidate_prefix_sync, make_cache_key
 from src.schemas.automations import (
     WorkflowCreate, WorkflowUpdate, WorkflowResponse, WorkflowVersionResponse,
     PublishBody, ExecutionResponse, ExecutionStepResponse, ManualExecuteBody
@@ -46,7 +47,13 @@ def list_workflows(
     db: Session = Depends(get_db),
 ):
     """Lista workflows da organização com filtro por status."""
-    return automation_service.list_workflows(db, organization_id, status=status, limit=limit, offset=offset)
+    cache_key = make_cache_key("automations:workflows", organization_id, status=status or "", limit=limit, offset=offset)
+    if cached := cache_get_sync(cache_key):
+        return cached
+    result = automation_service.list_workflows(db, organization_id, status=status, limit=limit, offset=offset)
+    # Serializar para JSON (result é lista de ORM)
+    cache_set_sync(cache_key, [r.model_dump(mode="json") if hasattr(r, "model_dump") else r for r in result], ttl=60)
+    return result
 
 
 @router.post("/workflows", response_model=WorkflowResponse, status_code=201)
@@ -68,6 +75,7 @@ def create_workflow(
     )
     db.commit()
     db.refresh(wf)
+    cache_invalidate_prefix_sync(f"automations:workflows:{organization_id}")
     return wf
 
 
@@ -103,6 +111,7 @@ def update_workflow(
     )
     db.commit()
     db.refresh(wf)
+    cache_invalidate_prefix_sync(f"automations:workflows:{organization_id}")
     return wf
 
 
@@ -121,6 +130,7 @@ def delete_workflow(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     db.commit()
+    cache_invalidate_prefix_sync(f"automations:workflows:{organization_id}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -150,6 +160,7 @@ def publish_workflow(
         resource_id=workflow_id, data_classification="ADM",
         data_after={"status": "PUBLISHED", "version": version.version_number},
     )
+    cache_invalidate_prefix_sync(f"automations:workflows:{organization_id}")
     return version
 
 
@@ -171,6 +182,7 @@ def disable_workflow(
         data_after={"status": "DISABLED"},
     )
     db.refresh(wf)
+    cache_invalidate_prefix_sync(f"automations:workflows:{organization_id}")
     return wf
 
 
@@ -247,10 +259,27 @@ def list_executions(
     db: Session = Depends(get_db),
 ):
     """Lista execuções da organização com filtros."""
-    return automation_service.list_executions(
+    # Execuções RUNNING nunca são cacheadas (real-time); terminais são cacheadas por 300s
+    ttl = 0
+    if status and status.upper() in ("COMPLETED", "FAILED", "CANCELLED"):
+        ttl = 300
+    elif status and status.upper() == "RUNNING":
+        ttl = 0
+    else:
+        ttl = 30
+
+    if ttl > 0:
+        cache_key = make_cache_key("automations:executions", organization_id, workflow_id=workflow_id or "", status=status or "", limit=limit, offset=offset)
+        if cached := cache_get_sync(cache_key):
+            return cached
+
+    result = automation_service.list_executions(
         db, organization_id, workflow_id=workflow_id, status=status,
         limit=limit, offset=offset,
     )
+    if ttl > 0:
+        cache_set_sync(cache_key, [r.model_dump(mode="json") if hasattr(r, "model_dump") else r for r in result], ttl=ttl)
+    return result
 
 
 @router.get("/executions/{execution_id}", response_model=ExecutionResponse)

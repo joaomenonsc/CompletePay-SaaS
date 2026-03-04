@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from src.api.deps import require_organization_id, require_org_role
 from src.api.middleware.auth import require_user_id
+from src.cache import cache_get_sync, cache_set_sync, cache_invalidate_prefix_sync, make_cache_key
 from src.db.models_crm import (
     ClinicalEncounter,
     HealthProfessional,
@@ -71,6 +72,14 @@ def list_payments(
     offset: int = Query(0, ge=0),
 ):
     """Lista pagamentos com filtros. Inclui nome do paciente e profissional."""
+    cache_key = make_cache_key(
+        "crm:financial:payments", organization_id,
+        encounter_id=encounter_id, date_from=str(date_from), date_to=str(date_to),
+        limit=limit, offset=offset,
+    )
+    if cached := cache_get_sync(cache_key):
+        return cached
+
     q = (
         select(
             Payment,
@@ -110,6 +119,8 @@ def list_payments(
         next_day = date_to + timedelta(days=1)
         count_q = count_q.where(Payment.paid_at < datetime.combine(next_day, time(0, 0), tzinfo=timezone.utc))
     total = db.execute(count_q).scalar() or 0
+    result = {"items": [i.model_dump(mode="json") if hasattr(i, "model_dump") else i for i in items], "total": total, "limit": limit, "offset": offset}
+    cache_set_sync(cache_key, result, ttl=60)
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
@@ -263,6 +274,9 @@ def create_payment(
     db.add(payment)
     db.commit()
     db.refresh(payment)
+    # Invalida cache financeiro (listagem e dashboard)
+    cache_invalidate_prefix_sync(f"crm:financial:payments:{organization_id}")
+    cache_invalidate_prefix_sync(f"crm:financial:dashboard:{organization_id}")
     log_audit(
         db, organization_id, user_id,
         action="create", resource_type="payment", resource_id=payment.id,
@@ -290,6 +304,10 @@ def get_dashboard_metrics(
     db: Session = Depends(get_db),
 ):
     """Metricas para o dashboard CRM: consultas do dia, pagamentos, pacientes."""
+    cache_key = f"crm:financial:dashboard:{organization_id}:default"
+    if cached := cache_get_sync(cache_key):
+        return cached
+
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     month_start = today_start.replace(day=1)
@@ -343,7 +361,7 @@ def get_dashboard_metrics(
         )
     ).scalar() or 0
 
-    return DashboardMetricsResponse(
+    result = DashboardMetricsResponse(
         encounters_today=encounters_today,
         encounters_completed_today=encounters_completed_today,
         payments_today_count=payments_today_count,
@@ -352,3 +370,5 @@ def get_dashboard_metrics(
         patients_total=patients_total,
         appointments_today=appointments_today,
     )
+    cache_set_sync(cache_key, result.model_dump(mode="json"), ttl=120)
+    return result
