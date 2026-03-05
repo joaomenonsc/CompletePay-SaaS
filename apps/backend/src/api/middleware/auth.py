@@ -39,6 +39,8 @@ PUBLIC_ROUTES = [
     ("POST", "/api/v1/automations/webhooks/"),  # webhook de automações (autenticação por secret)
     ("POST", "/api/v1/email-marketing/webhooks/resend"),
     ("POST", "/api/v1/email-marketing/webhooks/inbound"),
+    ("POST", "/api/v1/public/whatsapp/webhook/"),  # legado — manter por compatibilidade
+    ("POST", "/api/v1/whatsapp/webhook/"),  # webhook WhatsApp (autenticação por HMAC/account_id)
 ]
 
 

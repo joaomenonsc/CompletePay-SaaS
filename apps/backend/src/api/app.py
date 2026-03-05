@@ -3,6 +3,7 @@ Aplicacao FastAPI - Fase 7.
 Rotas /chat e /health; middleware de logging, rate limit e JWT opcional.
 """
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -29,12 +30,33 @@ from src.api.routes.organizations import router as organizations_router
 from src.api.routes.automations import router as automations_router
 from src.api.routes.automations_webhook import webhook_router as automations_webhook_router
 from src.api.routes.document_routes import router as document_router
+from src.api.routes.whatsapp import router as whatsapp_router
+from src.api.routes.whatsapp_webhook import webhook_router as whatsapp_webhook_router
+from src.api.routes.whatsapp_ws import router as whatsapp_ws_router
 from src.config.logging_config import setup_logging
 from src.config.sentry_config import init_sentry
 from src.config.settings import get_settings
 from src.config.telemetry import init_telemetry
 
 load_dotenv()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup/shutdown: inicia clientes Evolution WebSocket para contas conectadas."""
+    from src.ws.registry import evolution_registry
+    try:
+        await evolution_registry.start_all_connected_accounts()
+    except Exception as exc:
+        logging.getLogger("completepay.api").warning(
+            "Falha ao iniciar Evolution WS clients: %s", exc
+        )
+    yield
+    # Shutdown
+    try:
+        await evolution_registry.stop_all()
+    except Exception:
+        pass
 
 # Sentry: inicializar antes de tudo para capturar erros de startup (Onda 0.2)
 init_sentry()
@@ -58,6 +80,7 @@ app = FastAPI(
     docs_url=None if _is_prod else "/docs",
     redoc_url=None if _is_prod else "/redoc",
     openapi_url=None if _is_prod else "/openapi.json",
+    lifespan=lifespan,
 )
 
 # CORS: permite requisicoes do frontend. Em producao use apenas dominio(s) do frontend (Fase 3.3).
@@ -101,6 +124,9 @@ app.include_router(ws_chat_router)
 app.include_router(automations_router)
 app.include_router(automations_webhook_router)
 app.include_router(document_router)  # SBP-001: documentos via endpoint autenticado
+app.include_router(whatsapp_router)
+app.include_router(whatsapp_webhook_router)
+app.include_router(whatsapp_ws_router)
 
 # SBP-001: servir APENAS uploads publicos (avatares).
 # Documentos clinicos devem ser acessados via endpoint autenticado (document_routes).

@@ -75,7 +75,7 @@ def require_org_role(allowed_roles: list[str]):
                 status_code=403,
                 detail=f"Acesso negado: role '{role}' nao tem permissao para esta operacao.",
             )
-        return role
+        return organization_id
 
     return _dependency
 
@@ -107,6 +107,6 @@ def require_data_access(classification: str, allowed_roles: list[str]) -> Callab
                 status_code=403,
                 detail=f"Acesso negado: role '{role}' nao tem permissao para dados '{classification}'.",
             )
-        return role
+        return organization_id
 
     return _dependency

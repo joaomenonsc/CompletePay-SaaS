@@ -97,6 +97,7 @@ def run_migrate() -> int:
         from src.db import models_crm  # noqa: F401 - registra Patient, PatientConsent, etc.
         from src.db import models_marketing  # noqa: F401 - registra EmkTemplate, EmkCampaign, etc.
         from src.db import models_automations  # noqa: F401 - registra AutomationWorkflow, etc.
+        from src.db import models_whatsapp  # noqa: F401 - registra tabelas do módulo WhatsApp
 
         # Cria tabelas uma por uma para evitar que um erro em uma tabela
         # impeca a criacao das demais (rollback completo do create_all).

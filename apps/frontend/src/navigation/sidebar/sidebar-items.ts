@@ -14,6 +14,7 @@ import {
   Link2,
   type LucideIcon,
   Mail,
+  MessageCircle,
   MessageSquare,
   Send,
   Settings,
@@ -109,6 +110,19 @@ export const sidebarItems: NavGroup[] = [
           { title: "Templates", url: "/dashboard/email-marketing/templates", icon: FileText },
           { title: "Listas", url: "/dashboard/email-marketing/listas", icon: Users },
           { title: "Domínios", url: "/dashboard/email-marketing/dominios", icon: Globe },
+        ],
+      },
+      {
+        title: "WhatsApp",
+        url: "/dashboard/whatsapp",
+        icon: MessageCircle,
+        isNew: true,
+        subItems: [
+          { title: "Dashboard", url: "/dashboard/whatsapp", icon: LayoutDashboard },
+          { title: "Inbox", url: "/dashboard/whatsapp/inbox", icon: MessageCircle },
+          { title: "Templates", url: "/dashboard/whatsapp/templates", icon: FileText },
+          { title: "Campanhas", url: "/dashboard/whatsapp/campanhas", icon: Send },
+          { title: "Configurações", url: "/dashboard/whatsapp/configuracoes", icon: Settings },
         ],
       },
 
