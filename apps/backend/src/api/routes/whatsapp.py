@@ -349,9 +349,10 @@ async def receive_webhook(
 
     # ── messages.upsert — mensagem recebida ────────────────────────────────
     if event in ("messages.upsert", "message.received"):
-        from src.providers.whatsapp.evolution import _normalize_phone
+        from src.providers.whatsapp.evolution import _extract_phone_from_evolution_payload
 
         data = payload.get("data", {})
+        payload_sender = payload.get("sender")
         # Evolution pode enviar lista ou objeto único
         items = data if isinstance(data, list) else [data]
 
@@ -362,9 +363,16 @@ async def receive_webhook(
             if key.get("fromMe", False):
                 continue
 
-            remote_jid = key.get("remoteJid", "")
-            phone_normalized = _normalize_phone(remote_jid.split("@")[0])
+            phone_normalized = _extract_phone_from_evolution_payload(
+                key=key,
+                sender=payload_sender,
+            )
             if not phone_normalized:
+                logger.warning(
+                    "Webhook Evolution sem telefone mapeável: account=%s key=%s",
+                    account_id,
+                    key,
+                )
                 continue
 
             msg_type = item.get("messageType", "text").lower()

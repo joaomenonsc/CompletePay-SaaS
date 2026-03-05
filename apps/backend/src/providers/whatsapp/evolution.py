@@ -2,7 +2,6 @@
 Adapter para Evolution API (self-hosted WhatsApp gateway).
 Documentação: https://doc.evolution-api.com
 """
-import hashlib
 import logging
 import re
 from typing import Any, Optional
@@ -28,6 +27,39 @@ def _normalize_phone(phone: str) -> str:
 def _to_e164(phone_normalized: str) -> str:
     """Converte number normalizado para E.164 (com +)."""
     return f"+{phone_normalized}"
+
+
+def _extract_phone_from_evolution_payload(
+    key: dict[str, Any],
+    sender: str | None = None,
+) -> str:
+    """
+    Extrai telefone de payload Evolution priorizando JIDs reais (@s.whatsapp.net).
+    Eventos recentes podem trazer remoteJid em formato @lid e o número real em
+    remoteJidAlt/sender.
+    """
+    candidates: list[str] = []
+    for raw_candidate in (
+        key.get("remoteJidAlt"),
+        key.get("remoteJid"),
+        key.get("participantAlt"),
+        key.get("participant"),
+        sender,
+    ):
+        if raw_candidate:
+            candidates.append(str(raw_candidate))
+
+    for candidate in candidates:
+        local, sep, domain = candidate.partition("@")
+        phone_candidate = _normalize_phone(local if sep else candidate)
+        if not phone_candidate:
+            continue
+        # IDs LID não são números discáveis; preferir alternativas.
+        if domain.lower() == "lid":
+            continue
+        return phone_candidate
+
+    return ""
 
 
 class EvolutionAPIProvider(WhatsAppProviderInterface):
@@ -254,6 +286,7 @@ class EvolutionAPIProvider(WhatsAppProviderInterface):
         self, account_id: str, raw: dict[str, Any]
     ) -> list[WebhookPayload]:
         data = raw.get("data", {})
+        payload_sender = raw.get("sender")
         # Evolution pode enviar lista ou objeto único
         if isinstance(data, list):
             items = data
@@ -269,8 +302,16 @@ class EvolutionAPIProvider(WhatsAppProviderInterface):
                 continue
 
             remote_jid = key.get("remoteJid", "")
-            phone_normalized = _normalize_phone(remote_jid.split("@")[0])
+            phone_normalized = _extract_phone_from_evolution_payload(
+                key=key,
+                sender=payload_sender,
+            )
             if not phone_normalized:
+                logger.warning(
+                    "Evolution webhook sem telefone mapeável. remoteJid=%s account_id=%s",
+                    remote_jid,
+                    account_id,
+                )
                 continue
 
             msg_type = item.get("messageType", "text").lower()
