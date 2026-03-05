@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import func, or_, desc
+from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 
 from src.db.models_whatsapp import (
@@ -53,6 +53,32 @@ def _display_phone(phone_normalized: str) -> Optional[str]:
     if len(d) == 10:  # fixo com DDD
         return f"({d[:2]}) {d[2:6]}-{d[6:]}"
     return None
+
+
+def _phone_variants(phone_normalized: str) -> list[str]:
+    """
+    Retorna variantes equivalentes do telefone para deduplicação.
+    Regra BR: tratar celular com/sem nono dígito como o mesmo contato.
+    """
+    normalized = _normalize_phone(phone_normalized)
+    if not normalized:
+        return []
+
+    variants = {normalized}
+
+    # +55 + DDD + 8 dígitos (12 no total) -> tenta versão com nono dígito
+    # apenas quando já parece celular (inicia com 9).
+    if len(normalized) == 12 and normalized.startswith("55"):
+        subscriber = normalized[4:]
+        if subscriber.startswith("9"):
+            variants.add(f"{normalized[:4]}9{subscriber}")
+
+    # +55 + DDD + 9 dígitos (13 no total) -> versão sem nono dígito
+    if len(normalized) == 13 and normalized.startswith("55") and normalized[4] == "9":
+        variants.add(f"{normalized[:4]}{normalized[5:]}")
+
+    # Ordena para manter determinismo (mais longo primeiro: tende ao formato com 9).
+    return sorted(variants, key=lambda p: (-len(p), p))
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +262,7 @@ def get_or_create_contact(
     organization_id: str,
     phone: str,
     display_name: Optional[str] = None,
+    account_id: Optional[str] = None,
 ) -> WhatsAppContact:
     """
     Retorna contato existente ou cria um novo.
@@ -247,8 +274,42 @@ def get_or_create_contact(
 
     contact = db.query(WhatsAppContact).filter(
         WhatsAppContact.organization_id == organization_id,
+        WhatsAppContact.is_deleted == False,
         WhatsAppContact.phone_normalized == phone_normalized,
     ).first()
+
+    if not contact:
+        variants = _phone_variants(phone_normalized)
+        candidates = db.query(WhatsAppContact).filter(
+            WhatsAppContact.organization_id == organization_id,
+            WhatsAppContact.is_deleted == False,
+            WhatsAppContact.phone_normalized.in_(variants),
+        ).all()
+
+        if candidates:
+            # 1) Se já existe conversa aberta na conta, reutilizar o mesmo contato.
+            if account_id:
+                candidate_ids = [c.id for c in candidates]
+                conv_contact = db.query(WhatsAppConversation.contact_id).filter(
+                    WhatsAppConversation.organization_id == organization_id,
+                    WhatsAppConversation.account_id == account_id,
+                    WhatsAppConversation.status == ConversationStatus.OPEN,
+                    WhatsAppConversation.is_deleted == False,
+                    WhatsAppConversation.contact_id.in_(candidate_ids),
+                ).order_by(desc(WhatsAppConversation.last_message_at)).first()
+                if conv_contact and conv_contact[0]:
+                    mapped = {c.id: c for c in candidates}
+                    contact = mapped.get(conv_contact[0])
+
+            # 2) Fallback: preferir formato com nono dígito (mais longo).
+            if not contact:
+                contact = sorted(
+                    candidates,
+                    key=lambda c: (
+                        -len(c.phone_normalized or ""),
+                        -(c.created_at.timestamp() if c.created_at else 0.0),
+                    ),
+                )[0]
 
     if contact:
         # Atualiza display_name se fornecido
@@ -425,7 +486,13 @@ def record_inbound_message(
         logger.debug("Mensagem duplicada recebida: %s — ignorando.", external_message_id)
         return existing
 
-    contact = get_or_create_contact(db, organization_id, phone, display_name)
+    contact = get_or_create_contact(
+        db,
+        organization_id,
+        phone,
+        display_name,
+        account_id=account.id,
+    )
 
     # Verificar opt-out
     if contact.opted_out:
