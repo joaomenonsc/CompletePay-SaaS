@@ -104,6 +104,37 @@ def _configure_evolution_instance(
 
     try:
         with httpx.Client(timeout=10.0) as client:
+            # Garante que a instância existe antes de configurar webhook/websocket.
+            # Evolution v2 normalmente usa POST /instance/create.
+            state_resp = client.get(
+                f"{base_url}/instance/connectionState/{instance_name}",
+                headers=headers,
+            )
+            if state_resp.status_code >= 400:
+                created = False
+                create_payloads = [
+                    {"instanceName": instance_name},
+                    {"instanceName": instance_name, "integration": "WHATSAPP-BAILEYS"},
+                    {"instanceName": instance_name, "integration": "WHATSAPP-BAILEYS", "qrcode": True},
+                ]
+                for create_body in create_payloads:
+                    create_resp = client.post(
+                        f"{base_url}/instance/create",
+                        headers=headers,
+                        json=create_body,
+                    )
+                    if 200 <= create_resp.status_code < 300 or create_resp.status_code == 409:
+                        created = True
+                        break
+
+                if not created:
+                    logger.warning(
+                        "Auto-config Evolution instance/create falhou: account=%s status=%s body=%s",
+                        account.id,
+                        state_resp.status_code,
+                        state_resp.text[:200],
+                    )
+
             # Websocket events (não depende de webhook secret)
             ws_resp = client.post(
                 f"{base_url}/websocket/set/{instance_name}",
