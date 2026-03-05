@@ -68,6 +68,16 @@ class Settings(BaseSettings):
     blob_read_write_token: str = Field(
         default="", validation_alias="BLOB_READ_WRITE_TOKEN"
     )
+    # WhatsApp (white-label): configuração global da Evolution API.
+    whatsapp_evolution_base_url: str = Field(
+        default="", validation_alias="WHATSAPP_EVOLUTION_BASE_URL"
+    )
+    whatsapp_evolution_api_key: str = Field(
+        default="", validation_alias="WHATSAPP_EVOLUTION_API_KEY"
+    )
+    whatsapp_instance_prefix: str = Field(
+        default="cp", validation_alias="WHATSAPP_INSTANCE_PREFIX"
+    )
     # Sentry DSN para captura de erros no backend (Onda 0.2 — Performance)
     sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
     # OpenTelemetry OTLP endpoint para tracing distribuído (Onda 3.1)

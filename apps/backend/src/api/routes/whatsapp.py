@@ -6,6 +6,7 @@ RBAC: usa require_org_role da deps.py.
 import hashlib
 import hmac
 import logging
+import re
 import secrets
 from typing import Optional
 
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from src.api.deps import get_db, require_org_role
 from src.api.middleware.auth import require_user_id
+from src.config.settings import get_settings
 from src.db.models_whatsapp import WhatsAppAccount
 from src.schemas.whatsapp import (
     AISuggestReplyResponse,
@@ -59,6 +61,23 @@ router = APIRouter(
 _OWNER_ROLES = ["gcl", "owner"]
 _MKT_ROLES = ["mkt", "gcl", "owner"]
 _ATENDENTE_ROLES = ["rcp", "enf", "gcl", "mkt", "owner"]
+
+
+def _build_default_instance_name(
+    *,
+    phone_number: str,
+    organization_id: str,
+) -> str:
+    """
+    Gera instance_name estável para contas criadas sem campo técnico no frontend.
+    """
+    digits = re.sub(r"\D", "", phone_number or "")
+    org_fragment = re.sub(r"[^a-z0-9]", "", (organization_id or "").lower())[:8] or "org"
+    phone_fragment = digits[-12:] if digits else secrets.token_hex(6)
+    settings = get_settings()
+    prefix_raw = (settings.whatsapp_instance_prefix or "cp").strip().lower()
+    prefix = re.sub(r"[^a-z0-9-]", "", prefix_raw) or "cp"
+    return f"{prefix}-{org_fragment}-{phone_fragment}"[:128]
 
 
 def _configure_evolution_instance(
@@ -158,10 +177,44 @@ def create_account(
 ):
     """Cria nova conta WhatsApp. [gcl, owner]"""
     try:
+        settings = get_settings()
+        effective_provider = (body.provider or "evolution").strip().lower()
+        effective_instance_name = body.instance_name
+        effective_api_base_url = body.api_base_url
+        effective_api_key = body.api_key
+
+        if effective_provider == "evolution":
+            effective_instance_name = (
+                body.instance_name
+                or _build_default_instance_name(
+                    phone_number=body.phone_number,
+                    organization_id=organization_id,
+                )
+            )
+            effective_api_base_url = (
+                body.api_base_url
+                or settings.whatsapp_evolution_base_url
+                or ""
+            ).strip()
+            effective_api_key = (
+                body.api_key
+                or settings.whatsapp_evolution_api_key
+                or ""
+            ).strip()
+
+            if not effective_api_base_url or not effective_api_key:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Configuração WhatsApp indisponível no ambiente. "
+                        "Contate o suporte."
+                    ),
+                )
+
         # Onboarding zero-touch para Evolution:
         # se não vier secret, gera um automaticamente para webhook auth.
         effective_webhook_secret = body.webhook_secret
-        if body.provider == "evolution" and not effective_webhook_secret:
+        if effective_provider == "evolution" and not effective_webhook_secret:
             effective_webhook_secret = secrets.token_hex(24)
 
         account = whatsapp_service.create_account(
@@ -169,10 +222,10 @@ def create_account(
             organization_id=organization_id,
             display_name=body.display_name,
             phone_number=body.phone_number,
-            provider=body.provider,
-            instance_name=body.instance_name,
-            api_base_url=body.api_base_url,
-            api_key=body.api_key,
+            provider=effective_provider,
+            instance_name=effective_instance_name,
+            api_base_url=effective_api_base_url,
+            api_key=effective_api_key,
             webhook_secret=effective_webhook_secret,
             is_default=body.is_default,
             created_by=user_id,
@@ -180,11 +233,16 @@ def create_account(
         db.commit()
         db.refresh(account)
 
-        if account.provider == "evolution" and body.api_key and account.instance_name and account.api_base_url:
+        if (
+            account.provider == "evolution"
+            and effective_api_key
+            and account.instance_name
+            and account.api_base_url
+        ):
             webhook_url = str(request.url_for("receive_webhook", account_id=str(account.id)))
             _configure_evolution_instance(
                 account=account,
-                api_key=body.api_key,
+                api_key=effective_api_key,
                 webhook_url=webhook_url,
                 webhook_secret=effective_webhook_secret,
             )
@@ -194,6 +252,8 @@ def create_account(
         raise HTTPException(status_code=422, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         from sqlalchemy.exc import IntegrityError
         if isinstance(e, IntegrityError):
@@ -230,6 +290,7 @@ def update_account(
     if not account:
         raise HTTPException(status_code=404, detail="Conta não encontrada.")
     try:
+        settings = get_settings()
         whatsapp_service.update_account(
             db=db,
             account=account,
@@ -245,7 +306,12 @@ def update_account(
 
         if account.provider == "evolution" and account.instance_name and account.api_base_url:
             from src.providers.whatsapp.encryption import decrypt_api_key
-            api_key = body.api_key or (decrypt_api_key(account.api_key_encrypted) if account.api_key_encrypted else "")
+            api_key = (
+                body.api_key
+                or (decrypt_api_key(account.api_key_encrypted) if account.api_key_encrypted else "")
+                or settings.whatsapp_evolution_api_key
+                or ""
+            )
             webhook_url = str(request.url_for("receive_webhook", account_id=str(account.id)))
             _configure_evolution_instance(
                 account=account,
