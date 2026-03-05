@@ -3,10 +3,14 @@ Rotas autenticadas do módulo WhatsApp.
 Prefixo: /api/v1/whatsapp
 RBAC: usa require_org_role da deps.py.
 """
+import hashlib
+import hmac
 import logging
+import secrets
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
+import httpx
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_db, require_org_role
@@ -57,6 +61,76 @@ _MKT_ROLES = ["mkt", "gcl", "owner"]
 _ATENDENTE_ROLES = ["rcp", "enf", "gcl", "mkt", "owner"]
 
 
+def _configure_evolution_instance(
+    *,
+    account: WhatsAppAccount,
+    api_key: str,
+    webhook_url: str,
+    webhook_secret: Optional[str],
+) -> None:
+    """
+    Best-effort: configura webhook e websocket da instância Evolution.
+    Não interrompe o fluxo principal em caso de falha remota.
+    """
+    base_url = (account.api_base_url or "").rstrip("/")
+    instance_name = (account.instance_name or "").strip()
+    if not base_url or not instance_name or not api_key:
+        return
+
+    headers = {
+        "Content-Type": "application/json",
+        "apikey": api_key,
+    }
+    ws_events = ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE"]
+
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            # Websocket events (não depende de webhook secret)
+            ws_resp = client.post(
+                f"{base_url}/websocket/set/{instance_name}",
+                headers=headers,
+                json={"websocket": {"enabled": True, "events": ws_events}},
+            )
+            if not (200 <= ws_resp.status_code < 300):
+                logger.warning(
+                    "Auto-config Evolution websocket/set falhou: account=%s status=%s body=%s",
+                    account.id,
+                    ws_resp.status_code,
+                    ws_resp.text[:200],
+                )
+
+            # Webhook: só atualiza header se tivermos o secret raw
+            if webhook_secret:
+                wh_resp = client.post(
+                    f"{base_url}/webhook/set/{instance_name}",
+                    headers=headers,
+                    json={
+                        "webhook": {
+                            "url": webhook_url,
+                            "enabled": True,
+                            "events": ws_events,
+                            "headers": {"X-Webhook-Secret": webhook_secret},
+                            "webhookByEvents": False,
+                            "webhookBase64": False,
+                        }
+                    },
+                )
+                if not (200 <= wh_resp.status_code < 300):
+                    logger.warning(
+                        "Auto-config Evolution webhook/set falhou: account=%s status=%s body=%s",
+                        account.id,
+                        wh_resp.status_code,
+                        wh_resp.text[:200],
+                    )
+    except Exception as exc:
+        logger.warning(
+            "Auto-config Evolution indisponível: account=%s instance=%s err=%s",
+            account.id,
+            instance_name,
+            exc,
+        )
+
+
 # ===========================================================================
 # Contas WhatsApp
 # ===========================================================================
@@ -77,12 +151,19 @@ def list_accounts(
 @router.post("/accounts", response_model=WhatsAppAccountResponse, status_code=201)
 def create_account(
     body: WhatsAppAccountCreate,
+    request: Request,
     db: Session = Depends(get_db),
     organization_id: str = Depends(require_org_role(_OWNER_ROLES)),
     user_id: str = Depends(require_user_id),
 ):
     """Cria nova conta WhatsApp. [gcl, owner]"""
     try:
+        # Onboarding zero-touch para Evolution:
+        # se não vier secret, gera um automaticamente para webhook auth.
+        effective_webhook_secret = body.webhook_secret
+        if body.provider == "evolution" and not effective_webhook_secret:
+            effective_webhook_secret = secrets.token_hex(24)
+
         account = whatsapp_service.create_account(
             db=db,
             organization_id=organization_id,
@@ -92,12 +173,22 @@ def create_account(
             instance_name=body.instance_name,
             api_base_url=body.api_base_url,
             api_key=body.api_key,
-            webhook_secret=body.webhook_secret,
+            webhook_secret=effective_webhook_secret,
             is_default=body.is_default,
             created_by=user_id,
         )
         db.commit()
         db.refresh(account)
+
+        if account.provider == "evolution" and body.api_key and account.instance_name and account.api_base_url:
+            webhook_url = str(request.url_for("receive_webhook", account_id=str(account.id)))
+            _configure_evolution_instance(
+                account=account,
+                api_key=body.api_key,
+                webhook_url=webhook_url,
+                webhook_secret=effective_webhook_secret,
+            )
+
         return account
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -130,6 +221,7 @@ def get_account(
 def update_account(
     account_id: str,
     body: WhatsAppAccountUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     organization_id: str = Depends(require_org_role(_OWNER_ROLES)),
 ):
@@ -150,6 +242,18 @@ def update_account(
         )
         db.commit()
         db.refresh(account)
+
+        if account.provider == "evolution" and account.instance_name and account.api_base_url:
+            from src.providers.whatsapp.encryption import decrypt_api_key
+            api_key = body.api_key or (decrypt_api_key(account.api_key_encrypted) if account.api_key_encrypted else "")
+            webhook_url = str(request.url_for("receive_webhook", account_id=str(account.id)))
+            _configure_evolution_instance(
+                account=account,
+                api_key=api_key,
+                webhook_url=webhook_url,
+                webhook_secret=body.webhook_secret,  # só temos raw no request atual
+            )
+
         return account
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -254,11 +358,11 @@ async def sync_account_status(
 def rotate_webhook_secret(
     account_id: str,
     body: dict,
+    request: Request,
     db: Session = Depends(get_db),
     organization_id: str = Depends(require_org_role(_OWNER_ROLES)),
 ):
     """Rotaciona o webhook secret da conta. [gcl, owner]"""
-    import hashlib
     account = whatsapp_service.get_account(db, account_id, organization_id)
     if not account:
         raise HTTPException(status_code=404, detail="Conta não encontrada.")
@@ -267,6 +371,18 @@ def rotate_webhook_secret(
         raise HTTPException(status_code=422, detail="webhook_secret é obrigatório.")
     account.webhook_secret_hash = hashlib.sha256(new_secret.encode()).hexdigest()
     db.commit()
+
+    if account.provider == "evolution" and account.instance_name and account.api_base_url and account.api_key_encrypted:
+        from src.providers.whatsapp.encryption import decrypt_api_key
+        api_key = decrypt_api_key(account.api_key_encrypted)
+        webhook_url = str(request.url_for("receive_webhook", account_id=str(account.id)))
+        _configure_evolution_instance(
+            account=account,
+            api_key=api_key,
+            webhook_url=webhook_url,
+            webhook_secret=new_secret,
+        )
+
     return {"status": "ok", "message": "Webhook secret atualizado."}
 
 
@@ -286,8 +402,6 @@ async def receive_webhook(
     Endpoint público (sem JWT) para receber eventos do Evolution API.
     URL a configurar no Evolution: https://<seu-backend>/api/v1/whatsapp/webhook/{account_id}
     """
-    import hashlib
-    import hmac
 
     # Buscar a conta sem filtrar por org (webhook é público)
     account = db.query(WhatsAppAccount).filter(
