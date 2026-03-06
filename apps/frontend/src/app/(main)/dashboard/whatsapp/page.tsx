@@ -6,7 +6,6 @@ import {
     CheckCircle2,
     Users,
     AlertTriangle,
-    TrendingUp,
     Loader2,
     Plus,
     ArrowRight,
@@ -31,6 +30,12 @@ import { useMetrics, useConversations } from "@/hooks/use-whatsapp";
 import type { WAConversation } from "@/types/whatsapp";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import {
+    getContactDisplayName,
+    getContactInitial,
+    getContactPhotoUrl,
+} from "@/lib/whatsapp-contact";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 type MetricPeriod = "1d" | "7d" | "30d" | "90d";
 
@@ -90,10 +95,13 @@ const statusConfig: Record<
 
 export default function WhatsAppDashboard() {
     const [period, setPeriod] = useState<MetricPeriod>("7d");
-    const { data: metrics, isLoading: metricsLoading } = useMetrics(period);
+    const { data: metrics, isLoading: metricsLoading } = useMetrics(period, {
+        refetchIntervalMs: 60_000,
+    });
     const { data: convData, isLoading: convLoading } = useConversations({
         status: "open",
         limit: 5,
+        refetchIntervalMs: 30_000,
     });
     const recentConversations: WAConversation[] = convData?.items ?? [];
 
@@ -259,11 +267,9 @@ export default function WhatsAppDashboard() {
                         ) : recentConversations.length > 0 ? (
                             <div className="divide-y">
                                 {recentConversations.map((conv) => {
-                                    const name =
-                                        conv.contact?.display_name ||
-                                        conv.contact?.phone_display ||
-                                        conv.contact?.phone_e164 ||
-                                        "–";
+                                    const name = getContactDisplayName(conv.contact);
+                                    const initial = getContactInitial(conv.contact);
+                                    const photoUrl = getContactPhotoUrl(conv.contact);
                                     const timeAgo = conv.last_message_at
                                         ? formatDistanceToNow(
                                             new Date(conv.last_message_at),
@@ -280,9 +286,12 @@ export default function WhatsAppDashboard() {
                                             className="-mx-2 flex items-center justify-between rounded px-2 py-3 transition-colors hover:bg-muted/50"
                                         >
                                             <div className="flex items-center gap-3">
-                                                <div className="flex size-8 items-center justify-center rounded-full bg-green-100 text-sm font-semibold text-green-700">
-                                                    {name[0]?.toUpperCase() ?? "?"}
-                                                </div>
+                                                <Avatar className="size-8 bg-green-100 text-green-700">
+                                                    <AvatarImage src={photoUrl ?? undefined} alt={name} />
+                                                    <AvatarFallback className="bg-green-100 font-semibold text-green-700 text-sm">
+                                                        {initial}
+                                                    </AvatarFallback>
+                                                </Avatar>
                                                 <div>
                                                     <p className="text-sm font-medium">{name}</p>
                                                     {conv.last_message_preview && (

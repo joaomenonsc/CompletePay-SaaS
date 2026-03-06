@@ -1,16 +1,16 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
     MessageCircle,
     Search,
-    Loader2,
     Filter,
     Wifi,
-    WifiOff,
 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
     Select,
     SelectContent,
@@ -21,8 +21,16 @@ import {
 import { cn } from "@/lib/utils";
 import { ConversationListItem } from "@/components/whatsapp/conversation-list-item";
 import { ConversationPanel } from "@/components/whatsapp/conversation-panel";
-import { useConversations, useAccounts } from "@/hooks/use-whatsapp";
+import { useDebounce } from "@/hooks/use-debounce";
+import { useConversations, useAccounts, usePrefetchConversationThread } from "@/hooks/use-whatsapp";
 import { useInboxWebSocket, type WsStatus } from "@/hooks/use-inbox-ws";
+import { getContactDisplayName, getContactPhone } from "@/lib/whatsapp-contact";
+import { markConversationReadOptimistically } from "@/lib/whatsapp-query-cache";
+import {
+    abandonWhatsAppUxMetric,
+    beginWhatsAppUxMetric,
+    completeWhatsAppUxMetric,
+} from "@/lib/whatsapp-ux-metrics";
 
 // Conecta um WS por conta conectada ao Evolution
 function AccountWsConnector({
@@ -39,11 +47,39 @@ function AccountWsConnector({
     return null;
 }
 
+function ConversationListSkeleton() {
+    return (
+        <div className="divide-y">
+            {Array.from({ length: 8 }).map((_, index) => (
+                <div key={`wa-conv-skeleton-${index}`} className="flex items-start gap-3 px-3 py-3">
+                    <Skeleton className="size-10 shrink-0 rounded-full" />
+                    <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                            <div className="space-y-2">
+                                <Skeleton className="h-4 w-28 rounded-full" />
+                                <Skeleton className="h-3 w-36 rounded-full" />
+                            </div>
+                            <div className="flex flex-col items-end gap-2">
+                                <Skeleton className="h-3 w-12 rounded-full" />
+                                <Skeleton className="h-4 w-4 rounded-full" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
+
 export default function WhatsAppInbox() {
+    const qc = useQueryClient();
     const [statusFilter, setStatusFilter] = useState<string>("open");
     const [search, setSearch] = useState("");
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [wsStatuses, setWsStatuses] = useState<Record<string, WsStatus>>({});
+    const prefetchConversationThread = usePrefetchConversationThread({ limit: 100 });
+    const debouncedSearch = useDebounce(search, 250);
+    const debouncedStatusFilter = useDebounce(statusFilter, 150);
 
     // Estável — não trocado entre renders, evita re-mount do WS
     const handleWsStatus = useCallback((id: string, s: WsStatus) => {
@@ -51,8 +87,9 @@ export default function WhatsAppInbox() {
     }, []);
 
     const { data, isLoading, isError } = useConversations({
-        status: statusFilter === "all" ? undefined : statusFilter,
+        status: debouncedStatusFilter === "all" ? undefined : debouncedStatusFilter,
         limit: 50,
+        refetchIntervalMs: selectedId ? 15_000 : 8_000,
     });
 
     // Contas para conectar WS
@@ -61,26 +98,49 @@ export default function WhatsAppInbox() {
         (a) => a.status === "connected" && a.provider === "evolution"
     );
 
-    const conversations = (data?.items ?? []).filter((conv) => {
-        if (!search) return true;
-        const name =
-            conv.contact?.display_name ||
-            conv.contact?.phone_display ||
-            conv.contact?.phone_e164 ||
-            "";
-        const preview = conv.last_message_preview || "";
-        const q = search.toLowerCase();
-        return name.toLowerCase().includes(q) || preview.toLowerCase().includes(q);
-    });
+    const normalizedSearch = debouncedSearch.trim().toLowerCase();
+    const inboxTtiMetricRef = useRef<string | null>(null);
+
+    useEffect(() => {
+        inboxTtiMetricRef.current = beginWhatsAppUxMetric("inbox_tti", {
+            screen: "whatsapp_inbox",
+        });
+        return () => {
+            abandonWhatsAppUxMetric(inboxTtiMetricRef.current);
+        };
+    }, []);
+
+    useEffect(() => {
+        if (isLoading || !inboxTtiMetricRef.current) return;
+        completeWhatsAppUxMetric(inboxTtiMetricRef.current, {
+            conversations_total: data?.total ?? 0,
+            result: isError ? "error" : "ready",
+        });
+        inboxTtiMetricRef.current = null;
+    }, [data?.total, isError, isLoading]);
+
+    const conversations = useMemo(() => {
+        const items = data?.items ?? [];
+        if (!normalizedSearch) return items;
+
+        return items.filter((conv) => {
+            const name = getContactDisplayName(conv.contact);
+            const phone = getContactPhone(conv.contact);
+            const preview = conv.last_message_preview || "";
+            const searchableText = `${name} ${phone} ${preview}`.toLowerCase();
+            return searchableText.includes(normalizedSearch);
+        });
+    }, [data?.items, normalizedSearch]);
 
     // Status geral do WS (connected se pelo menos um está connected)
-    const wsValues = Object.values(wsStatuses);
-    const overallWs: WsStatus =
-        wsValues.includes("connected")
+    const overallWs: WsStatus = useMemo(() => {
+        const wsValues = Object.values(wsStatuses);
+        return wsValues.includes("connected")
             ? "connected"
             : wsValues.includes("connecting")
                 ? "connecting"
                 : "disconnected";
+    }, [wsStatuses]);
 
     return (
         <>
@@ -154,8 +214,8 @@ export default function WhatsAppInbox() {
                     {/* Lista */}
                     <div className="flex-1 overflow-y-auto">
                         {isLoading ? (
-                            <div className="flex justify-center py-16">
-                                <Loader2 className="size-6 animate-spin text-muted-foreground" />
+                            <div className="px-1 pb-3">
+                                <ConversationListSkeleton />
                             </div>
                         ) : isError ? (
                             <p className="py-10 text-center text-sm text-muted-foreground">
@@ -176,7 +236,12 @@ export default function WhatsAppInbox() {
                                         key={conv.id}
                                         conversation={conv}
                                         isActive={conv.id === selectedId}
-                                        onClick={() => setSelectedId(conv.id)}
+                                        onHover={() => prefetchConversationThread(conv.id)}
+                                        onClick={() => {
+                                            prefetchConversationThread(conv.id);
+                                            markConversationReadOptimistically(qc, conv.id);
+                                            setSelectedId(conv.id);
+                                        }}
                                     />
                                 ))}
                             </div>

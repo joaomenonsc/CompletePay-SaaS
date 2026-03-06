@@ -1,8 +1,21 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { API_BASE_URL } from "@/lib/api-config";
+import { removePersistedPendingMessage } from "@/lib/whatsapp-pending-store";
+import {
+    applyIncomingMessageToConversationCache,
+    getConversationFromCache,
+    replaceConversationInCache,
+} from "@/lib/whatsapp-query-cache";
+import type {
+    WAAccountListResponse,
+    WAConversation,
+    WAMessage,
+    WAMessageListResponse,
+    WAMessageStatus,
+} from "@/types/whatsapp";
 import { useAuthStore } from "@/store/auth-store";
 
 /** Converte http(s):// → ws(s):// */
@@ -16,6 +29,135 @@ export type WsStatus = "connecting" | "connected" | "disconnected";
 interface UseInboxWsOptions {
     accountId: string | null;
     onStatusChange?: (status: WsStatus) => void;
+}
+
+type MessageUpdateEventItem = {
+    external_message_id?: string;
+    status?: string;
+    error?: string | null;
+};
+
+function normalizeMessageStatus(value: unknown): WAMessageStatus | null {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (
+        normalized === "pending"
+        || normalized === "sent"
+        || normalized === "delivered"
+        || normalized === "read"
+        || normalized === "failed"
+    ) {
+        return normalized;
+    }
+    return null;
+}
+
+function isMessageListResponse(value: unknown): value is WAMessageListResponse {
+    if (!value || typeof value !== "object") return false;
+    return Array.isArray((value as WAMessageListResponse).items);
+}
+
+function isInfiniteMessageListResponse(
+    value: unknown
+): value is InfiniteData<WAMessageListResponse, unknown> {
+    if (!value || typeof value !== "object") return false;
+    return Array.isArray((value as InfiniteData<WAMessageListResponse, unknown>).pages);
+}
+
+function appendMessageToThreadCache(
+    value: unknown,
+    message: WAMessage
+): unknown {
+    if (!value) {
+        return {
+            items: [message],
+            total: 1,
+            limit: 100,
+            offset: 0,
+        } satisfies WAMessageListResponse;
+    }
+
+    if (isMessageListResponse(value)) {
+        const exists = value.items.some((item) => item.id === message.id);
+        if (exists) return value;
+        return {
+            ...value,
+            items: [...value.items, message],
+            total: value.total + 1,
+        };
+    }
+
+    if (isInfiniteMessageListResponse(value)) {
+        const exists = value.pages.some((page) => (
+            page.items.some((item) => item.id === message.id)
+        ));
+        if (exists) return value;
+
+        if (!value.pages.length) {
+            return {
+                ...value,
+                pages: [{
+                    items: [message],
+                    total: 1,
+                    limit: 100,
+                    offset: 0,
+                }],
+            };
+        }
+
+        return {
+            ...value,
+            pages: value.pages.map((page, index) => ({
+                ...page,
+                items: index === 0 ? [...page.items, message] : page.items,
+                total: page.total + 1,
+            })),
+        };
+    }
+
+    return value;
+}
+
+function patchMessageStatuses(
+    value: unknown,
+    updates: MessageUpdateEventItem[]
+): unknown {
+    const applyToItems = (items: WAMessage[]) => {
+        let changed = false;
+        const nextItems = items.map((message) => {
+            const match = updates.find(
+                (item) =>
+                    item.external_message_id
+                    && item.external_message_id === message.external_message_id
+            );
+            if (!match) return message;
+            const nextStatus = normalizeMessageStatus(match.status);
+            if (!nextStatus) return message;
+            changed = true;
+            return {
+                ...message,
+                status: nextStatus,
+                error_message: match.error || undefined,
+            };
+        });
+        return { changed, nextItems };
+    };
+
+    if (isMessageListResponse(value)) {
+        const { changed, nextItems } = applyToItems(value.items);
+        return changed ? { ...value, items: nextItems } : value;
+    }
+
+    if (isInfiniteMessageListResponse(value)) {
+        let changed = false;
+        const nextPages = value.pages.map((page) => {
+            const result = applyToItems(page.items);
+            if (result.changed) changed = true;
+            return result.changed ? { ...page, items: result.nextItems } : page;
+        });
+        return changed ? { ...value, pages: nextPages } : value;
+    }
+
+    return value;
 }
 
 /**
@@ -56,27 +198,73 @@ export function useInboxWebSocket({ accountId, onStatusChange }: UseInboxWsOptio
             switch (type) {
                 case "message.new": {
                     const convId = event.conversation_id as string | null;
-                    const msg = event.message as Record<string, unknown>;
+                    const msg = event.message as WAMessage;
+                    const eventConversation = (
+                        event.conversation && typeof event.conversation === "object"
+                    )
+                        ? event.conversation as WAConversation
+                        : null;
                     if (!convId) break;
+                    if (typeof msg.client_pending_id === "string" && msg.client_pending_id.trim()) {
+                        removePersistedPendingMessage(msg.client_pending_id);
+                    }
                     client.setQueriesData(
                         { queryKey: ["wa-messages", convId] },
-                        (old: { items: unknown[]; total: number } | undefined) => {
-                            if (!old) return old;
-                            const exists = old.items.some(
-                                (m: unknown) => (m as { id: string }).id === msg.id
-                            );
-                            if (exists) return old;
-                            return { ...old, items: [...old.items, msg], total: old.total + 1 };
-                        }
+                        (old) => appendMessageToThreadCache(old, msg)
                     );
-                    client.invalidateQueries({ queryKey: ["wa-conversations"] });
+                    if (eventConversation?.id) {
+                        replaceConversationInCache(
+                            client,
+                            eventConversation,
+                            getConversationFromCache(client, eventConversation.id)
+                        );
+                    }
+                    applyIncomingMessageToConversationCache(client, convId, {
+                        direction: String(msg.direction || "inbound") as "inbound" | "outbound",
+                        body_text: typeof msg.body_text === "string" ? msg.body_text : undefined,
+                        message_type: String(msg.message_type || "text"),
+                        created_at: typeof msg.created_at === "string" ? msg.created_at : "",
+                    });
                     break;
                 }
                 case "message.update":
-                    client.invalidateQueries({ queryKey: ["wa-messages"] });
+                    {
+                        const updatesRaw = Array.isArray(event.data) ? event.data : [];
+                        const updates = updatesRaw.filter(
+                            (item): item is MessageUpdateEventItem =>
+                                !!item && typeof item === "object"
+                        );
+                        if (updates.length === 0) break;
+
+                        client.setQueriesData<WAMessageListResponse>(
+                            { queryKey: ["wa-messages"] },
+                            (old) => patchMessageStatuses(old, updates) as WAMessageListResponse
+                        );
+                    }
                     break;
                 case "connection.update":
-                    client.invalidateQueries({ queryKey: ["wa-accounts"] });
+                    {
+                        const nextStatus = String(event.status || "").trim();
+                        if (!nextStatus) break;
+                        client.setQueriesData<WAAccountListResponse>(
+                            { queryKey: ["wa-accounts"] },
+                            (old) => {
+                                if (!old?.items?.length) return old;
+                                let changed = false;
+                                const nextItems = old.items.map((account) => {
+                                    if (account.id !== id || account.status === nextStatus) {
+                                        return account;
+                                    }
+                                    changed = true;
+                                    return {
+                                        ...account,
+                                        status: nextStatus as WAAccountListResponse["items"][number]["status"],
+                                    };
+                                });
+                                return changed ? { ...old, items: nextItems } : old;
+                            }
+                        );
+                    }
                     break;
                 default:
                     break;
