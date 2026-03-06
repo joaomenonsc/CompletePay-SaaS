@@ -28,7 +28,7 @@ class InboundMessage:
     external_message_id: str
     phone_normalized: str       # telefone remetente (apenas dígitos)
     phone_e164: str             # telefone remetente E.164 (com +)
-    direction: str              # sempre "inbound"
+    direction: str              # "inbound" | "outbound" (fromMe no provider)
     message_type: str           # "text" | "audio" | "image" | "document" | etc.
     body_text: Optional[str] = None
     media_url: Optional[str] = None
@@ -36,6 +36,7 @@ class InboundMessage:
     media_filename: Optional[str] = None
     received_at: Optional[str] = None      # ISO 8601
     display_name: Optional[str] = None    # Nome do contato no WhatsApp
+    profile_picture_url: Optional[str] = None
     provider_metadata: Optional[dict[str, Any]] = None
 
 
@@ -101,10 +102,23 @@ class WhatsAppProviderInterface(ABC):
         media_url: str,
         media_type: str,
         caption: Optional[str] = None,
+        media_mime_type: Optional[str] = None,
+        media_filename: Optional[str] = None,
         *,
         instance: Optional[str] = None,
     ) -> SendMessageResult:
         """Envia mídia (imagem, áudio, documento)."""
+
+    @abstractmethod
+    def delete_message(
+        self,
+        to_phone: str,
+        message_id: str,
+        *,
+        remote_jid: Optional[str] = None,
+        instance: Optional[str] = None,
+    ) -> SendMessageResult:
+        """Apaga mensagem previamente enviada."""
 
     @abstractmethod
     def parse_webhook(

@@ -21,9 +21,28 @@ class MetaOfficialProvider(WhatsAppProviderInterface):
                       variables: Optional[dict[str, Any]] = None, *, instance: Optional[str] = None) -> SendMessageResult:
         raise NotImplementedError("MetaOfficialProvider: send_template não implementado (Fase 2).")
 
-    def send_media(self, to_phone: str, media_url: str, media_type: str,
-                   caption: Optional[str] = None, *, instance: Optional[str] = None) -> SendMessageResult:
+    def send_media(
+        self,
+        to_phone: str,
+        media_url: str,
+        media_type: str,
+        caption: Optional[str] = None,
+        media_mime_type: Optional[str] = None,
+        media_filename: Optional[str] = None,
+        *,
+        instance: Optional[str] = None,
+    ) -> SendMessageResult:
         raise NotImplementedError("MetaOfficialProvider: send_media não implementado (Fase 2).")
+
+    def delete_message(
+        self,
+        to_phone: str,
+        message_id: str,
+        *,
+        remote_jid: Optional[str] = None,
+        instance: Optional[str] = None,
+    ) -> SendMessageResult:
+        raise NotImplementedError("MetaOfficialProvider: delete_message não implementado (Fase 2).")
 
     def parse_webhook(self, account_id: str, raw_payload: dict[str, Any]) -> list[WebhookPayload]:
         raise NotImplementedError("MetaOfficialProvider: parse_webhook não implementado (Fase 2).")

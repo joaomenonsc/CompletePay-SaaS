@@ -357,6 +357,19 @@ class WhatsAppMessage(Base):
         Index("ix_wa_messages_external_id", "external_message_id"),
     )
 
+    @property
+    def client_pending_id(self) -> Optional[str]:
+        metadata = self.provider_metadata if isinstance(self.provider_metadata, dict) else {}
+        raw_value = metadata.get("client_pending_id")
+        if isinstance(raw_value, str):
+            normalized = raw_value.strip()
+            if normalized:
+                return normalized
+        external_id = (self.external_message_id or "").strip()
+        if external_id.startswith("pending:"):
+            return external_id
+        return None
+
 
 # ---------------------------------------------------------------------------
 # 5. WhatsAppTemplate — template de mensagem

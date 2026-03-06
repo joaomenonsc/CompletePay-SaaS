@@ -17,6 +17,31 @@ def _normalize_phone(phone: str) -> str:
     return re.sub(r"\D", "", phone or "")
 
 
+def _build_message_media_proxy_url(message_id: str) -> str:
+    return f"/api/v1/whatsapp/messages/{message_id}/media"
+
+
+def _is_media_message_type(message_type: str) -> bool:
+    return message_type.lower() in {"audio", "image", "video", "document", "sticker"}
+
+
+def _looks_like_message_payload(data: Any) -> bool:
+    raw = data.get("data") if isinstance(data, dict) and "data" in data else data
+    items = raw if isinstance(raw, list) else [raw]
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        key = item.get("key")
+        message = item.get("message")
+        if isinstance(key, dict) and (
+            isinstance(message, dict)
+            or bool(item.get("messageType"))
+            or isinstance(item.get("content"), dict)
+        ):
+            return True
+    return False
+
+
 class EvolutionSocketClient:
     """
     Cliente Socket.IO async para uma instância do Evolution API.
@@ -172,6 +197,9 @@ class EvolutionSocketClient:
             "MESSAGES_UPSERT",
             "MESSAGES_UPDATE",
             "CONNECTION_UPDATE",
+            "SEND_MESSAGE",
+            "SEND_MESSAGE_UPDATE",
+            "MESSAGES_SET",
         ]
         payloads = [
             {"websocket": {"enabled": True, "events": events}},
@@ -202,6 +230,16 @@ class EvolutionSocketClient:
             "messages.upsert",
             "messages.update",
             "connection.update",
+            "send.message",
+            "message.create",
+            "message.new",
+            "messages.set",
+            "message.received",
+            "messages.received",
+            "messages.append",
+            "SEND_MESSAGE",
+            "MESSAGES_SET",
+            "MESSAGE_RECEIVED",
             "MESSAGES_UPSERT",
             "MESSAGES_UPDATE",
             "CONNECTION_UPDATE",
@@ -222,6 +260,16 @@ class EvolutionSocketClient:
 
         @sio.on("messages.upsert")
         @sio.on("MESSAGES_UPSERT")
+        @sio.on("send.message")
+        @sio.on("SEND_MESSAGE")
+        @sio.on("messages.set")
+        @sio.on("MESSAGES_SET")
+        @sio.on("message.received")
+        @sio.on("MESSAGE_RECEIVED")
+        @sio.on("message.new")
+        @sio.on("message.create")
+        @sio.on("messages.append")
+        @sio.on("messages.received")
         async def on_messages_upsert(data: Any):
             await self._handle_message_upsert(data)
 
@@ -244,6 +292,14 @@ class EvolutionSocketClient:
         @sio.on("*")
         async def on_any_event(event: str, data: Any):
             if event in known_events:
+                return
+            if _looks_like_message_payload(data):
+                logger.info(
+                    "Evolution WS evento message-like não mapeado: instance=%s event=%s",
+                    self.instance_name,
+                    event,
+                )
+                await self._handle_message_upsert(data)
                 return
             payload_type = type(data).__name__
             if isinstance(data, dict):
@@ -274,6 +330,15 @@ class EvolutionSocketClient:
         """Persiste mensagem no banco e faz broadcast para o frontend."""
         from src.db.session import SessionLocal
         from src.db.models_whatsapp import WhatsAppAccount
+        from src.providers.whatsapp.evolution import (
+            _extract_chat_display_name,
+            _extract_message_datetime,
+            _extract_message_body_text,
+            _extract_media_payload,
+            _extract_message_type,
+            _extract_phone_from_evolution_payload,
+            _extract_profile_picture_url,
+        )
         from src.services import whatsapp_service
         from src.ws.connection_manager import ws_manager
 
@@ -285,6 +350,7 @@ class EvolutionSocketClient:
             "extendedtextmessage": "text",
             "imagemessage": "image",
             "audiomessage": "audio",
+            "pttmessage": "audio",
             "videomessage": "video",
             "documentmessage": "document",
             "stickermessage": "sticker",
@@ -305,73 +371,101 @@ class EvolutionSocketClient:
                 if not isinstance(item, dict):
                     continue
                 key = item.get("key", {})
-                if key.get("fromMe", False):
-                    continue
+                is_from_me = bool(key.get("fromMe", False))
 
-                remote_jid = key.get("remoteJid", "")
-                phone = _normalize_phone(remote_jid.split("@")[0])
+                phone = _extract_phone_from_evolution_payload(
+                    key=key,
+                    sender=item.get("sender"),
+                )
                 if not phone:
                     continue
 
                 message = item.get("message", {})
-                msg_type = str(item.get("messageType", "")).lower()
-                if not msg_type and isinstance(message, dict) and message:
-                    msg_type = str(next(iter(message.keys()))).lower()
-                if not msg_type:
-                    msg_type = "text"
-                mapped_type = type_map.get(msg_type, "text")
+                mapped_type = type_map.get(_extract_message_type(item), "text")
 
-                body_text = (
-                    message.get("conversation")
-                    or message.get("extendedTextMessage", {}).get("text")
-                    or None
-                )
-                if not body_text and isinstance(message, dict):
-                    for media_key in ("imageMessage", "videoMessage", "documentMessage"):
-                        media_msg = message.get(media_key, {})
-                        if isinstance(media_msg, dict) and media_msg.get("caption"):
-                            body_text = media_msg.get("caption")
-                            break
-
-                media_url = message.get("url") if isinstance(message, dict) else None
-                if not media_url and isinstance(message, dict):
-                    for media_key in ("imageMessage", "audioMessage", "videoMessage", "documentMessage"):
-                        media_msg = message.get(media_key, {})
-                        if isinstance(media_msg, dict) and media_msg.get("url"):
-                            media_url = media_msg.get("url")
-                            break
+                body_text = _extract_message_body_text(message)
+                media_url, media_type, media_filename = _extract_media_payload(message)
+                message_at = _extract_message_datetime(item)
                 external_id = key.get("id") or f"evo-ws-{phone}-{idx}"
-                display_name = item.get("pushName") or None
+                display_name = _extract_chat_display_name(item, phone)
+                profile_picture_url = _extract_profile_picture_url(item)
 
-                msg = whatsapp_service.record_inbound_message(
-                    db=db,
-                    organization_id=self.organization_id,
-                    account=account,
-                    external_message_id=external_id,
-                    phone=phone,
-                    message_type=mapped_type,
-                    body_text=body_text,
-                    media_url=media_url,
-                    display_name=display_name,
-                    provider_metadata=item,
-                )
+                if is_from_me:
+                    msg = whatsapp_service.record_provider_outbound_message(
+                        db=db,
+                        organization_id=self.organization_id,
+                        account=account,
+                        external_message_id=external_id,
+                        phone=phone,
+                        message_type=mapped_type,
+                        body_text=body_text,
+                        media_url=media_url,
+                        media_type=media_type,
+                        media_filename=media_filename,
+                        display_name=display_name,
+                        profile_picture_url=profile_picture_url,
+                        provider_metadata=item,
+                        event_at=message_at,
+                    )
+                else:
+                    msg = whatsapp_service.record_inbound_message(
+                        db=db,
+                        organization_id=self.organization_id,
+                        account=account,
+                        external_message_id=external_id,
+                        phone=phone,
+                        message_type=mapped_type,
+                        body_text=body_text,
+                        media_url=media_url,
+                        media_type=media_type,
+                        media_filename=media_filename,
+                        display_name=display_name,
+                        profile_picture_url=profile_picture_url,
+                        provider_metadata=item,
+                        event_at=message_at,
+                    )
                 db.commit()
 
                 if msg:
+                    whatsapp_service.enrich_message_sender_context(msg)
+                    media_url = msg.media_url
+                    if (
+                        isinstance(msg.provider_metadata, dict)
+                        and (
+                            msg.media_url
+                            or msg.media_type
+                            or _is_media_message_type(str(msg.message_type))
+                        )
+                    ):
+                        media_url = _build_message_media_proxy_url(str(msg.id))
+
                     # Serializar e enviar para o frontend em tempo real
                     conv = msg.conversation_id
                     await ws_manager.broadcast(self.account_id, {
                         "type": "message.new",
                         "account_id": self.account_id,
                         "conversation_id": conv,
+                        "conversation": whatsapp_service.serialize_conversation_snapshot(
+                            db,
+                            self.organization_id,
+                            str(conv),
+                        ),
                         "message": {
                             "id": str(msg.id),
                             "conversation_id": conv,
-                            "direction": "inbound",
-                            "message_type": mapped_type,
-                            "body_text": body_text,
-                            "status": "read",
+                            "external_message_id": msg.external_message_id,
+                            "client_pending_id": msg.client_pending_id,
+                            "direction": str(msg.direction),
+                            "message_type": msg.message_type,
+                            "body_text": msg.body_text,
+                            "media_url": media_url,
+                            "media_type": msg.media_type,
+                            "media_filename": msg.media_filename,
+                            "status": msg.status,
                             "created_at": msg.created_at.isoformat() if msg.created_at else None,
+                            "is_group_message": bool(getattr(msg, "is_group_message", False)),
+                            "sender_name": getattr(msg, "sender_name", None),
+                            "sender_phone": getattr(msg, "sender_phone", None),
                         },
                     })
                     logger.info(

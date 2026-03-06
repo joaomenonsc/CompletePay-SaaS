@@ -8,11 +8,11 @@ import hashlib
 import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from sqlalchemy import func, desc
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from src.db.models_whatsapp import (
     WhatsAppAccount,
@@ -27,6 +27,12 @@ from src.db.models_whatsapp import (
 )
 
 logger = logging.getLogger("completepay.whatsapp.service")
+_DELETED_MESSAGE_PLACEHOLDER = "Você apagou esta mensagem."
+
+_PROFILE_PIC_RETRY_INTERVAL = timedelta(hours=6)
+_PROFILE_PIC_LOOKUP_CACHE: dict[str, datetime] = {}
+_GROUP_NAME_RETRY_INTERVAL = timedelta(minutes=15)
+_GROUP_NAME_LOOKUP_CACHE: dict[str, tuple[datetime, Optional[str]]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +85,453 @@ def _phone_variants(phone_normalized: str) -> list[str]:
 
     # Ordena para manter determinismo (mais longo primeiro: tende ao formato com 9).
     return sorted(variants, key=lambda p: (-len(p), p))
+
+
+def _normalize_profile_picture_url(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return None
+    normalized = url.strip()
+    if not normalized:
+        return None
+    if normalized.lower() in {"null", "undefined"}:
+        return None
+    if normalized.startswith("http://") or normalized.startswith("https://"):
+        return normalized
+    return None
+
+
+def _to_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _normalize_client_pending_id(value: Optional[str]) -> Optional[str]:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    return normalized[:256]
+
+
+def _merge_provider_metadata(
+    current: Optional[dict],
+    extra: Optional[dict],
+    *,
+    client_pending_id: Optional[str] = None,
+) -> Optional[dict]:
+    merged: dict = {}
+    if isinstance(current, dict):
+        merged.update(current)
+    if isinstance(extra, dict):
+        merged.update(extra)
+    normalized_pending_id = _normalize_client_pending_id(client_pending_id)
+    if normalized_pending_id:
+        merged["client_pending_id"] = normalized_pending_id
+    return merged or None
+
+
+def _provider_timestamp_seconds(raw_value: object) -> int:
+    if raw_value is None:
+        return 0
+    if isinstance(raw_value, dict):
+        low = raw_value.get("low")
+        high = raw_value.get("high")
+        if isinstance(low, (int, float)):
+            if isinstance(high, (int, float)):
+                try:
+                    combined = (int(high) << 32) + int(low)
+                    if combined > 0:
+                        return combined
+                except Exception:
+                    pass
+            return int(low)
+        return 0
+    if isinstance(raw_value, str):
+        raw_value = raw_value.strip()
+        if not raw_value:
+            return 0
+    try:
+        ts = int(float(raw_value))
+    except Exception:
+        return 0
+    if ts <= 0:
+        return 0
+    if ts > 10_000_000_000:
+        ts = ts // 1000
+    return ts
+
+
+def _provider_metadata_datetime(metadata: Optional[dict]) -> Optional[datetime]:
+    if not isinstance(metadata, dict):
+        return None
+    ts = _provider_timestamp_seconds(metadata.get("messageTimestamp"))
+    if ts <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(ts, tz=timezone.utc)
+    except Exception:
+        return None
+
+
+def _provider_metadata_is_group_message(metadata: Optional[dict]) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    key = metadata.get("key")
+    if not isinstance(key, dict):
+        return False
+    for field in ("remoteJid", "remoteJidAlt", "participant", "participantAlt"):
+        raw = key.get(field)
+        if not raw:
+            continue
+        _, sep, domain = str(raw).partition("@")
+        if sep and domain.lower() == "g.us":
+            return True
+    return False
+
+
+def _sanitize_sender_name(value: object) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate:
+        return None
+    if candidate.lower() in {"null", "undefined"}:
+        return None
+    if candidate in {"-", "_"}:
+        return None
+    return candidate
+
+
+def _extract_sender_phone(raw_value: object) -> Optional[str]:
+    if not raw_value:
+        return None
+    raw = str(raw_value).strip()
+    if not raw:
+        return None
+
+    local, sep, domain = raw.partition("@")
+    if sep and domain.lower() == "g.us":
+        return None
+
+    normalized = _normalize_phone(local if sep else raw)
+    if not normalized:
+        return None
+    return _to_e164(normalized)
+
+
+def serialize_contact_snapshot(contact: Optional[WhatsAppContact]) -> Optional[dict]:
+    if not contact:
+        return None
+    return {
+        "id": str(contact.id),
+        "organization_id": str(contact.organization_id),
+        "phone_normalized": contact.phone_normalized,
+        "phone_e164": contact.phone_e164,
+        "phone_display": contact.phone_display,
+        "display_name": contact.display_name,
+        "profile_picture_url": contact.profile_picture_url,
+        "opted_out": bool(contact.opted_out),
+        "opted_out_at": contact.opted_out_at.isoformat() if contact.opted_out_at else None,
+        "patient_id": str(contact.patient_id) if contact.patient_id else None,
+        "tags": list(contact.tags) if isinstance(contact.tags, list) else None,
+        "is_deleted": bool(contact.is_deleted),
+        "created_at": contact.created_at.isoformat() if contact.created_at else None,
+        "updated_at": contact.updated_at.isoformat() if contact.updated_at else None,
+    }
+
+
+def serialize_conversation_snapshot(
+    db: Session,
+    organization_id: str,
+    conversation_id: str,
+) -> Optional[dict]:
+    conversation = db.query(WhatsAppConversation).filter(
+        WhatsAppConversation.organization_id == organization_id,
+        WhatsAppConversation.id == conversation_id,
+    ).first()
+    if not conversation:
+        return None
+
+    contact = None
+    if conversation.contact_id:
+        contact = db.query(WhatsAppContact).filter(
+            WhatsAppContact.organization_id == organization_id,
+            WhatsAppContact.id == conversation.contact_id,
+        ).first()
+
+    return {
+        "id": str(conversation.id),
+        "organization_id": str(conversation.organization_id),
+        "account_id": str(conversation.account_id),
+        "contact_id": str(conversation.contact_id),
+        "contact": serialize_contact_snapshot(contact),
+        "status": conversation.status,
+        "assigned_to": conversation.assigned_to,
+        "unread_count": int(conversation.unread_count or 0),
+        "last_message_at": conversation.last_message_at.isoformat() if conversation.last_message_at else None,
+        "last_message_preview": conversation.last_message_preview,
+        "first_response_at": conversation.first_response_at.isoformat() if conversation.first_response_at else None,
+        "resolved_at": conversation.resolved_at.isoformat() if conversation.resolved_at else None,
+        "sla_deadline": conversation.sla_deadline.isoformat() if conversation.sla_deadline else None,
+        "tags": list(conversation.tags) if isinstance(conversation.tags, list) else None,
+        "is_deleted": bool(conversation.is_deleted),
+        "created_at": conversation.created_at.isoformat() if conversation.created_at else None,
+    }
+
+
+def _extract_group_sender_identity(metadata: Optional[dict]) -> tuple[Optional[str], Optional[str]]:
+    if not _provider_metadata_is_group_message(metadata):
+        return None, None
+    if not isinstance(metadata, dict):
+        return None, None
+
+    key = metadata.get("key")
+    key_data = key if isinstance(key, dict) else {}
+
+    sender_phone: Optional[str] = None
+    for candidate in (
+        key_data.get("participantAlt"),
+        key_data.get("participant"),
+        metadata.get("participantAlt"),
+        metadata.get("participant"),
+        metadata.get("sender"),
+    ):
+        sender_phone = _extract_sender_phone(candidate)
+        if sender_phone:
+            break
+
+    sender_name: Optional[str] = None
+    for candidate in (
+        metadata.get("pushName"),
+        metadata.get("senderName"),
+        metadata.get("participantName"),
+        metadata.get("notifyName"),
+    ):
+        sender_name = _sanitize_sender_name(candidate)
+        if sender_name:
+            break
+
+    for parent_key in ("sender", "participant", "contact", "contextInfo", "messageContextInfo"):
+        if sender_name:
+            break
+        parent = metadata.get(parent_key)
+        if not isinstance(parent, dict):
+            continue
+        for field in ("pushName", "displayName", "fullName", "participantName", "notifyName", "name"):
+            sender_name = _sanitize_sender_name(parent.get(field))
+            if sender_name:
+                break
+
+    return sender_name, sender_phone
+
+
+def _extract_group_name_from_metadata(metadata: Optional[dict]) -> Optional[str]:
+    if not isinstance(metadata, dict):
+        return None
+
+    direct_fields = ("groupName", "groupSubject", "subject", "groupTitle")
+    for field in direct_fields:
+        value = _sanitize_sender_name(metadata.get(field))
+        if value:
+            return value
+
+    for parent_key in ("groupMetadata", "chat", "groupInfo", "conversation"):
+        parent = metadata.get(parent_key)
+        if not isinstance(parent, dict):
+            continue
+        for field in direct_fields + ("chatName", "conversationName", "title"):
+            value = _sanitize_sender_name(parent.get(field))
+            if value:
+                return value
+
+    # Fallback recursivo: alguns payloads escondem subject no contexto.
+    stack: list[object] = [metadata]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            for field in ("subject", "groupSubject", "groupName", "groupTitle", "chatName", "conversationName"):
+                value = _sanitize_sender_name(node.get(field))
+                if value:
+                    return value
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+
+    return None
+
+
+def _build_group_display_name(contact: WhatsAppContact) -> str:
+    return f"Grupo {contact.phone_e164 or contact.phone_normalized or ''}".strip()
+
+
+def _looks_like_sender_alias(current_name: Optional[str], sender_name: Optional[str]) -> bool:
+    if not current_name or not sender_name:
+        return False
+    return current_name.strip().casefold() == sender_name.strip().casefold()
+
+
+def _try_enrich_group_display_name(
+    account: WhatsAppAccount,
+    contact: WhatsAppContact,
+    provider_metadata: Optional[dict],
+) -> None:
+    if not _provider_metadata_is_group_message(provider_metadata):
+        return
+
+    current_name = _sanitize_sender_name(contact.display_name)
+    metadata_name = _extract_group_name_from_metadata(provider_metadata)
+    sender_name, _ = _extract_group_sender_identity(provider_metadata)
+
+    if metadata_name:
+        if current_name != metadata_name:
+            contact.display_name = metadata_name
+            logger.info(
+                "Nome de grupo atualizado via metadata: account=%s contact=%s new=%s",
+                account.id,
+                contact.id,
+                metadata_name,
+            )
+        return
+
+    cache_key = f"{account.id}:{contact.phone_normalized}"
+    now = datetime.now(timezone.utc)
+    cached = _GROUP_NAME_LOOKUP_CACHE.get(cache_key)
+    if cached and (now - cached[0]) < _GROUP_NAME_RETRY_INTERVAL:
+        cached_name = _sanitize_sender_name(cached[1])
+        if cached_name and cached_name != current_name:
+            contact.display_name = cached_name
+        elif not current_name:
+            contact.display_name = _build_group_display_name(contact)
+        return
+
+    fetched_name: Optional[str] = None
+    # Evita chamadas paralelas repetidas para o mesmo grupo.
+    _GROUP_NAME_LOOKUP_CACHE[cache_key] = (now, None)
+    try:
+        from src.providers.whatsapp.factory import get_whatsapp_provider
+
+        provider = get_whatsapp_provider(account)
+        fetcher = getattr(provider, "fetch_group_subject", None)
+        if callable(fetcher):
+            logger.info(
+                "Lookup nome de grupo no provider: account=%s contact=%s group=%s",
+                account.id,
+                contact.id,
+                contact.phone_normalized,
+            )
+            fetched_name = _sanitize_sender_name(fetcher(contact.phone_normalized))
+    except Exception:
+        logger.debug(
+            "Falha ao enriquecer nome do grupo: account=%s contact=%s",
+            account.id,
+            contact.id,
+            exc_info=True,
+        )
+
+    _GROUP_NAME_LOOKUP_CACHE[cache_key] = (now, fetched_name)
+
+    if fetched_name:
+        if fetched_name != current_name:
+            contact.display_name = fetched_name
+            logger.info(
+                "Nome de grupo atualizado via provider: account=%s contact=%s new=%s",
+                account.id,
+                contact.id,
+                fetched_name,
+            )
+        return
+
+    if not current_name or _looks_like_sender_alias(current_name, sender_name):
+        contact.display_name = _build_group_display_name(contact)
+        logger.info(
+            "Nome de grupo fallback aplicado: account=%s contact=%s new=%s",
+            account.id,
+            contact.id,
+            contact.display_name,
+        )
+
+
+def enrich_message_sender_context(message: WhatsAppMessage) -> None:
+    metadata = message.provider_metadata if isinstance(message.provider_metadata, dict) else None
+    is_group = _provider_metadata_is_group_message(metadata)
+    setattr(message, "is_group_message", is_group)
+
+    sender_name: Optional[str] = None
+    sender_phone: Optional[str] = None
+    if is_group and str(message.direction).lower() == MessageDirection.INBOUND:
+        sender_name, sender_phone = _extract_group_sender_identity(metadata)
+
+    setattr(message, "sender_name", sender_name)
+    setattr(message, "sender_phone", sender_phone)
+
+
+def enrich_messages_sender_context(messages: list[WhatsAppMessage]) -> None:
+    for message in messages:
+        enrich_message_sender_context(message)
+
+
+def _apply_last_message_if_newer(
+    conversation: WhatsAppConversation,
+    *,
+    message_at: datetime,
+    preview: str,
+) -> bool:
+    """
+    Atualiza last_message_* apenas quando a mensagem é mais nova que a atual.
+    """
+    current = _to_aware_utc(conversation.last_message_at)
+    if current and message_at < current:
+        return False
+    conversation.last_message_at = message_at
+    conversation.last_message_preview = preview
+    return True
+
+
+def _try_enrich_contact_profile_picture(
+    account: WhatsAppAccount,
+    contact: WhatsAppContact,
+) -> None:
+    """
+    Best effort: busca foto no provider quando webhook não envia profilePictureUrl.
+    Usa cache em memória para evitar chamada a cada mensagem sem foto.
+    """
+    if contact.profile_picture_url:
+        return
+    if account.provider != "evolution":
+        return
+
+    phone_key = (contact.phone_normalized or "").strip()
+    if not phone_key:
+        return
+
+    cache_key = f"{account.id}:{phone_key}"
+    now = datetime.now(timezone.utc)
+    last_attempt = _PROFILE_PIC_LOOKUP_CACHE.get(cache_key)
+    if last_attempt and (now - last_attempt) < _PROFILE_PIC_RETRY_INTERVAL:
+        return
+
+    _PROFILE_PIC_LOOKUP_CACHE[cache_key] = now
+    try:
+        from src.providers.whatsapp.factory import get_whatsapp_provider
+
+        provider = get_whatsapp_provider(account)
+        fetcher = getattr(provider, "fetch_profile_picture_url", None)
+        if not callable(fetcher):
+            return
+
+        fetched_url = _normalize_profile_picture_url(fetcher(phone_key))
+        if fetched_url:
+            contact.profile_picture_url = fetched_url
+            _PROFILE_PIC_LOOKUP_CACHE.pop(cache_key, None)
+    except Exception:
+        logger.debug(
+            "Falha ao enriquecer foto do contato: account=%s contact=%s",
+            account.id,
+            contact.id,
+            exc_info=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +715,7 @@ def get_or_create_contact(
     organization_id: str,
     phone: str,
     display_name: Optional[str] = None,
+    profile_picture_url: Optional[str] = None,
     account_id: Optional[str] = None,
 ) -> WhatsAppContact:
     """
@@ -311,10 +765,14 @@ def get_or_create_contact(
                     ),
                 )[0]
 
+    normalized_picture_url = _normalize_profile_picture_url(profile_picture_url)
+
     if contact:
         # Atualiza display_name se fornecido
         if display_name and not contact.display_name:
             contact.display_name = display_name
+        if normalized_picture_url and contact.profile_picture_url != normalized_picture_url:
+            contact.profile_picture_url = normalized_picture_url
         return contact
 
     # Cria novo contato
@@ -324,6 +782,7 @@ def get_or_create_contact(
         phone_e164=_to_e164(phone_normalized),
         phone_display=_display_phone(phone_normalized),
         display_name=display_name,
+        profile_picture_url=normalized_picture_url,
     )
     db.add(contact)
     db.flush()  # gera o id antes de retornar
@@ -417,7 +876,19 @@ def get_conversations_inbox(
     Listagem de inbox com filtros.
     Retorna ordenado por last_message_at DESC (mais recente primeiro).
     """
-    q = db.query(WhatsAppConversation).filter(
+    q = db.query(WhatsAppConversation).options(
+        load_only(
+            WhatsAppConversation.id,
+            WhatsAppConversation.organization_id,
+            WhatsAppConversation.account_id,
+            WhatsAppConversation.contact_id,
+            WhatsAppConversation.status,
+            WhatsAppConversation.unread_count,
+            WhatsAppConversation.last_message_at,
+            WhatsAppConversation.last_message_preview,
+            WhatsAppConversation.created_at,
+        )
+    ).filter(
         WhatsAppConversation.organization_id == organization_id,
         WhatsAppConversation.is_deleted == False,
     )
@@ -455,6 +926,80 @@ def update_conversation(
     return conversation
 
 
+def mark_conversation_as_read(
+    db: Session,
+    conversation: WhatsAppConversation,
+) -> bool:
+    """
+    Zera o contador de não lidas da conversa.
+    Retorna True quando houve alteração.
+    """
+    if (conversation.unread_count or 0) <= 0:
+        return False
+    conversation.unread_count = 0
+    return True
+
+
+def refresh_group_contact_name_from_recent_messages(
+    db: Session,
+    account: WhatsAppAccount,
+    conversation: WhatsAppConversation,
+    contact: WhatsAppContact,
+) -> bool:
+    """
+    Best effort: corrige nome de grupos antigos ao abrir a conversa.
+    Usa metadata das mensagens mais recentes e, se necessário, consulta o provider.
+    """
+    previous_name = contact.display_name
+
+    rows = db.query(WhatsAppMessage.provider_metadata).filter(
+        WhatsAppMessage.organization_id == conversation.organization_id,
+        WhatsAppMessage.conversation_id == conversation.id,
+    ).order_by(
+        desc(WhatsAppMessage.created_at),
+        desc(WhatsAppMessage.id),
+    ).limit(20).all()
+
+    refreshed = False
+    sender_aliases: set[str] = set()
+    for idx, row in enumerate(rows):
+        metadata = row[0] if isinstance(row, tuple) else row
+        if not _provider_metadata_is_group_message(metadata):
+            continue
+        sender_name, _ = _extract_group_sender_identity(metadata)
+        if sender_name:
+            sender_aliases.add(sender_name.strip().casefold())
+        # Usa a primeira mensagem apenas para eventual lookup no provider;
+        # aliases são coletados de todas as mensagens recentes.
+        if idx == 0:
+            _try_enrich_group_display_name(account, contact, metadata)
+            refreshed = True
+
+    if not refreshed and contact.phone_normalized:
+        # Fallback para grupos antigos sem metadata útil.
+        synthetic_metadata = {
+            "key": {"remoteJid": f"{contact.phone_normalized}@g.us"},
+        }
+        _try_enrich_group_display_name(account, contact, synthetic_metadata)
+
+    current = (contact.display_name or "").strip()
+    if current and current.casefold() in sender_aliases:
+        # Evita manter nome de participante como título da conversa de grupo.
+        fallback_name = _build_group_display_name(contact)
+        if current != fallback_name:
+            contact.display_name = fallback_name
+            logger.info(
+                "Nome de grupo ajustado para fallback por alias de participante: "
+                "account=%s contact=%s old=%s new=%s",
+                account.id,
+                contact.id,
+                current,
+                fallback_name,
+            )
+
+    return (contact.display_name or "") != (previous_name or "")
+
+
 # ---------------------------------------------------------------------------
 # Message helpers
 # ---------------------------------------------------------------------------
@@ -471,18 +1016,28 @@ def record_inbound_message(
     media_type: Optional[str] = None,
     media_filename: Optional[str] = None,
     display_name: Optional[str] = None,
+    profile_picture_url: Optional[str] = None,
     provider_metadata: Optional[dict] = None,
+    event_at: Optional[datetime] = None,
 ) -> Optional[WhatsAppMessage]:
     """
     Registra mensagem inbound recebida via webhook.
     Idempotente: verifica external_message_id antes de criar.
     """
+    now = datetime.now(timezone.utc)
+    provider_event_at = _to_aware_utc(event_at)
+    message_at = provider_event_at or now
+
     # Idempotência — C5 fix
     existing = db.query(WhatsAppMessage).filter(
         WhatsAppMessage.organization_id == organization_id,
         WhatsAppMessage.external_message_id == external_message_id,
     ).first()
     if existing:
+        if provider_event_at:
+            current_created = _to_aware_utc(existing.created_at)
+            if not current_created or abs((current_created - provider_event_at).total_seconds()) > 2:
+                existing.created_at = provider_event_at
         logger.debug("Mensagem duplicada recebida: %s — ignorando.", external_message_id)
         return existing
 
@@ -490,9 +1045,12 @@ def record_inbound_message(
         db,
         organization_id,
         phone,
-        display_name,
+        None if _provider_metadata_is_group_message(provider_metadata) else display_name,
+        profile_picture_url,
         account_id=account.id,
     )
+    _try_enrich_group_display_name(account, contact, provider_metadata)
+    _try_enrich_contact_profile_picture(account, contact)
 
     # Verificar opt-out
     if contact.opted_out:
@@ -505,13 +1063,14 @@ def record_inbound_message(
         db, organization_id, account.id, contact.id
     )
 
-    # Atualizar metadados da conversa
-    now = datetime.now(timezone.utc)
-    conversation.last_message_at = now
-    conversation.unread_count = (conversation.unread_count or 0) + 1
-
     preview = (body_text or "")[:256] if body_text else f"[{message_type}]"
-    conversation.last_message_preview = preview
+    is_latest = _apply_last_message_if_newer(
+        conversation,
+        message_at=message_at,
+        preview=preview,
+    )
+    if is_latest:
+        conversation.unread_count = (conversation.unread_count or 0) + 1
 
     # Registrar first_response_at se ainda não registrado
     if not conversation.first_response_at and conversation.created_at:
@@ -530,7 +1089,8 @@ def record_inbound_message(
         media_type=media_type,
         media_filename=media_filename,
         provider_metadata=provider_metadata,
-        read_at=now,
+        read_at=message_at,
+        created_at=message_at,
     )
     db.add(msg)
 
@@ -544,12 +1104,103 @@ def record_inbound_message(
     return msg
 
 
+def record_provider_outbound_message(
+    db: Session,
+    organization_id: str,
+    account: WhatsAppAccount,
+    external_message_id: str,
+    phone: str,
+    message_type: str,
+    body_text: Optional[str] = None,
+    media_url: Optional[str] = None,
+    media_type: Optional[str] = None,
+    media_filename: Optional[str] = None,
+    display_name: Optional[str] = None,
+    profile_picture_url: Optional[str] = None,
+    provider_metadata: Optional[dict] = None,
+    event_at: Optional[datetime] = None,
+) -> Optional[WhatsAppMessage]:
+    """
+    Registra mensagem outbound capturada do provider (ex.: enviada pelo celular conectado).
+    Idempotente por external_message_id.
+    """
+    now = datetime.now(timezone.utc)
+    provider_event_at = _to_aware_utc(event_at)
+    message_at = provider_event_at or now
+    existing = db.query(WhatsAppMessage).filter(
+        WhatsAppMessage.organization_id == organization_id,
+        WhatsAppMessage.external_message_id == external_message_id,
+    ).first()
+    if existing:
+        if provider_event_at:
+            current_created = _to_aware_utc(existing.created_at)
+            if not current_created or abs((current_created - provider_event_at).total_seconds()) > 2:
+                existing.created_at = provider_event_at
+        # Enriquecer registro existente sem sobrescrever conteúdo já salvo.
+        if not existing.body_text and body_text:
+            existing.body_text = body_text
+        if not existing.media_url and media_url:
+            existing.media_url = media_url
+        if not existing.media_type and media_type:
+            existing.media_type = media_type
+        if not existing.media_filename and media_filename:
+            existing.media_filename = media_filename
+        if not existing.provider_metadata and provider_metadata:
+            existing.provider_metadata = provider_metadata
+        if existing.status == MessageStatus.PENDING:
+            existing.status = MessageStatus.SENT
+            existing.sent_at = existing.sent_at or now
+        return existing
+
+    contact = get_or_create_contact(
+        db,
+        organization_id,
+        phone,
+        None if _provider_metadata_is_group_message(provider_metadata) else display_name,
+        profile_picture_url,
+        account_id=account.id,
+    )
+    _try_enrich_group_display_name(account, contact, provider_metadata)
+    _try_enrich_contact_profile_picture(account, contact)
+    conversation = get_or_create_conversation(
+        db, organization_id, account.id, contact.id
+    )
+
+    _apply_last_message_if_newer(
+        conversation,
+        message_at=message_at,
+        preview=(body_text or "")[:256] if body_text else f"[{message_type}]",
+    )
+    if not conversation.first_response_at:
+        conversation.first_response_at = message_at
+
+    msg = WhatsAppMessage(
+        organization_id=organization_id,
+        conversation_id=conversation.id,
+        contact_id=contact.id,
+        external_message_id=external_message_id,
+        direction=MessageDirection.OUTBOUND,
+        message_type=message_type,
+        status=MessageStatus.SENT,
+        body_text=body_text,
+        media_url=media_url,
+        media_type=media_type,
+        media_filename=media_filename,
+        provider_metadata=provider_metadata,
+        sent_at=message_at,
+        created_at=message_at,
+    )
+    db.add(msg)
+    return msg
+
+
 def send_text_message(
     db: Session,
     account: WhatsAppAccount,
     conversation: WhatsAppConversation,
     text: str,
     user_id: Optional[str] = None,
+    client_pending_id: Optional[str] = None,
 ) -> WhatsAppMessage:
     """
     Envia mensagem de texto via provider e registra no banco.
@@ -567,7 +1218,8 @@ def send_text_message(
         raise ValueError("Contato possui opt-out ativo. Não é possível enviar mensagem.")
 
     # ID interno temporário para idempotência antes do ACK do provider
-    temp_external_id = f"pending:{uuid.uuid4()}"
+    normalized_pending_id = _normalize_client_pending_id(client_pending_id)
+    temp_external_id = normalized_pending_id or f"pending:{uuid.uuid4()}"
 
     msg = WhatsAppMessage(
         organization_id=conversation.organization_id,
@@ -578,6 +1230,7 @@ def send_text_message(
         message_type="text",
         status=MessageStatus.PENDING,
         body_text=text,
+        provider_metadata=_merge_provider_metadata(None, None, client_pending_id=temp_external_id),
         sender_user_id=user_id,
     )
     db.add(msg)
@@ -589,25 +1242,338 @@ def send_text_message(
         result = provider.send_text(contact.phone_e164, text)
 
         if result.status != "failed" and result.external_message_id:
-            msg.external_message_id = result.external_message_id
-            msg.status = MessageStatus.SENT
-            msg.sent_at = datetime.now(timezone.utc)
-            msg.provider_metadata = result.provider_metadata
+            existing = db.query(WhatsAppMessage).filter(
+                WhatsAppMessage.organization_id == conversation.organization_id,
+                WhatsAppMessage.external_message_id == result.external_message_id,
+                WhatsAppMessage.id != msg.id,
+            ).first()
+            if existing:
+                # Webhook/WS pode ter persistido a mensagem antes do ACK HTTP.
+                existing.sender_user_id = existing.sender_user_id or user_id
+                existing.status = MessageStatus.SENT
+                existing.sent_at = existing.sent_at or datetime.now(timezone.utc)
+                existing.provider_metadata = _merge_provider_metadata(
+                    existing.provider_metadata,
+                    result.provider_metadata,
+                    client_pending_id=temp_external_id,
+                )
+                db.delete(msg)
+                msg = existing
+            else:
+                msg.external_message_id = result.external_message_id
+                msg.status = MessageStatus.SENT
+                msg.sent_at = datetime.now(timezone.utc)
+                msg.provider_metadata = _merge_provider_metadata(
+                    msg.provider_metadata,
+                    result.provider_metadata,
+                    client_pending_id=temp_external_id,
+                )
         else:
             msg.status = MessageStatus.FAILED
             msg.error_message = result.error or "Falha desconhecida no provider."
             msg.failed_at = datetime.now(timezone.utc)
+            msg.provider_metadata = _merge_provider_metadata(
+                msg.provider_metadata,
+                None,
+                client_pending_id=temp_external_id,
+            )
     except Exception as e:
         logger.exception("Falha ao enviar mensagem via provider")
         msg.status = MessageStatus.FAILED
         msg.error_message = str(e)[:512]
         msg.failed_at = datetime.now(timezone.utc)
+        msg.provider_metadata = _merge_provider_metadata(
+            msg.provider_metadata,
+            None,
+            client_pending_id=temp_external_id,
+        )
 
     # Atualiza conversa
     now = datetime.now(timezone.utc)
     conversation.last_message_at = now
     conversation.last_message_preview = text[:256]
     # Primeira resposta do atendente
+    if not conversation.first_response_at:
+        conversation.first_response_at = now
+
+    return msg
+
+
+def edit_outbound_text_message(
+    db: Session,
+    account: WhatsAppAccount,
+    conversation: WhatsAppConversation,
+    message: WhatsAppMessage,
+    new_text: str,
+    user_id: Optional[str] = None,
+) -> WhatsAppMessage:
+    """
+    Edita uma mensagem outbound de texto no provider e sincroniza no banco.
+    """
+    from src.providers.whatsapp.factory import get_whatsapp_provider
+
+    normalized_text = (new_text or "").strip()
+    if not normalized_text:
+        raise ValueError("Texto da edição não pode ser vazio.")
+
+    if message.direction != MessageDirection.OUTBOUND:
+        raise ValueError("Apenas mensagens enviadas podem ser editadas.")
+    if (message.message_type or "").lower() != "text":
+        raise ValueError("Apenas mensagens de texto podem ser editadas.")
+    if (message.external_message_id or "").startswith("pending:"):
+        raise ValueError("Aguarde o envio da mensagem para editar.")
+    if message.status == MessageStatus.FAILED:
+        raise ValueError("Não é possível editar mensagem com falha de envio.")
+    provider_metadata = message.provider_metadata if isinstance(message.provider_metadata, dict) else {}
+    if provider_metadata.get("deletedByUser"):
+        raise ValueError("Mensagem já foi apagada.")
+    if (message.body_text or "").strip() == _DELETED_MESSAGE_PLACEHOLDER:
+        raise ValueError("Mensagem já foi apagada.")
+
+    now = datetime.now(timezone.utc)
+    reference_time = _to_aware_utc(message.sent_at) or _to_aware_utc(message.created_at) or now
+    if (now - reference_time) > timedelta(minutes=15):
+        raise ValueError("Só é possível editar mensagens enviadas nos últimos 15 minutos.")
+
+    if (message.body_text or "").strip() == normalized_text:
+        return message
+
+    contact = db.query(WhatsAppContact).filter(
+        WhatsAppContact.id == conversation.contact_id,
+    ).first()
+    if not contact:
+        raise ValueError("Contato da conversa não encontrado.")
+
+    provider = get_whatsapp_provider(account)
+    updater = getattr(provider, "update_message_text", None)
+    if not callable(updater):
+        raise ValueError("Provider da conta não suporta edição de mensagem.")
+
+    key = provider_metadata.get("key")
+    key_data = key if isinstance(key, dict) else {}
+    remote_jid = key_data.get("remoteJid") or key_data.get("remoteJidAlt")
+    if remote_jid is not None:
+        remote_jid = str(remote_jid).strip() or None
+
+    result = updater(
+        to_phone=contact.phone_e164,
+        message_id=message.external_message_id,
+        new_text=normalized_text,
+        remote_jid=remote_jid,
+    )
+    if result.status == "failed":
+        raise ValueError(result.error or "Falha ao editar mensagem no provider.")
+
+    message.body_text = normalized_text
+    message.sender_user_id = user_id or message.sender_user_id
+    message.provider_metadata = {
+        **provider_metadata,
+        "editedAt": now.isoformat(),
+        "editedByUserId": user_id,
+        "editResponse": result.provider_metadata,
+    }
+
+    latest = db.query(WhatsAppMessage).filter(
+        WhatsAppMessage.organization_id == conversation.organization_id,
+        WhatsAppMessage.conversation_id == conversation.id,
+    ).order_by(desc(WhatsAppMessage.created_at), desc(WhatsAppMessage.id)).first()
+    if latest and latest.id == message.id:
+        conversation.last_message_preview = normalized_text[:256]
+
+    return message
+
+
+def delete_outbound_message(
+    db: Session,
+    account: WhatsAppAccount,
+    conversation: WhatsAppConversation,
+    message: WhatsAppMessage,
+    user_id: Optional[str] = None,
+) -> WhatsAppMessage:
+    """
+    Apaga uma mensagem outbound no provider e reflete no histórico local.
+    """
+    from src.providers.whatsapp.factory import get_whatsapp_provider
+
+    if message.direction != MessageDirection.OUTBOUND:
+        raise ValueError("Apenas mensagens enviadas podem ser apagadas.")
+    if (message.external_message_id or "").startswith("pending:"):
+        raise ValueError("Aguarde o envio da mensagem para apagar.")
+    if message.status == MessageStatus.FAILED:
+        raise ValueError("Não é possível apagar mensagem com falha de envio.")
+
+    provider_metadata = message.provider_metadata if isinstance(message.provider_metadata, dict) else {}
+    if provider_metadata.get("deletedByUser"):
+        return message
+    if (message.body_text or "").strip() == _DELETED_MESSAGE_PLACEHOLDER:
+        return message
+
+    contact = db.query(WhatsAppContact).filter(
+        WhatsAppContact.id == conversation.contact_id,
+    ).first()
+    if not contact:
+        raise ValueError("Contato da conversa não encontrado.")
+
+    provider = get_whatsapp_provider(account)
+    deleter = getattr(provider, "delete_message", None)
+    if not callable(deleter):
+        raise ValueError("Provider da conta não suporta apagar mensagem.")
+
+    key = provider_metadata.get("key")
+    key_data = key if isinstance(key, dict) else {}
+    remote_jid = key_data.get("remoteJid") or key_data.get("remoteJidAlt")
+    if remote_jid is not None:
+        remote_jid = str(remote_jid).strip() or None
+
+    result = deleter(
+        to_phone=contact.phone_e164,
+        message_id=message.external_message_id,
+        remote_jid=remote_jid,
+    )
+    if result.status == "failed":
+        raise ValueError(result.error or "Falha ao apagar mensagem no provider.")
+
+    now = datetime.now(timezone.utc)
+    message.body_text = _DELETED_MESSAGE_PLACEHOLDER
+    message.media_url = None
+    message.media_type = None
+    message.media_filename = None
+    message.message_type = "text"
+    message.sender_user_id = user_id or message.sender_user_id
+    message.provider_metadata = {
+        **provider_metadata,
+        "deletedByUser": True,
+        "deletedAt": now.isoformat(),
+        "deletedByUserId": user_id,
+        "deleteResponse": result.provider_metadata,
+    }
+
+    latest = db.query(WhatsAppMessage).filter(
+        WhatsAppMessage.organization_id == conversation.organization_id,
+        WhatsAppMessage.conversation_id == conversation.id,
+    ).order_by(desc(WhatsAppMessage.created_at), desc(WhatsAppMessage.id)).first()
+    if latest and latest.id == message.id:
+        conversation.last_message_preview = _DELETED_MESSAGE_PLACEHOLDER[:256]
+
+    return message
+
+
+def send_media_message(
+    db: Session,
+    account: WhatsAppAccount,
+    conversation: WhatsAppConversation,
+    media_payload: str,
+    provider_media_type: str,
+    media_mime_type: str,
+    media_filename: str,
+    caption: Optional[str] = None,
+    user_id: Optional[str] = None,
+    client_pending_id: Optional[str] = None,
+) -> WhatsAppMessage:
+    """
+    Envia mensagem com mídia via provider e registra no banco.
+    O db.commit() deve ser chamado pela rota após este método.
+    """
+    from src.providers.whatsapp.factory import get_whatsapp_provider
+
+    contact = db.query(WhatsAppContact).filter(
+        WhatsAppContact.id == conversation.contact_id,
+    ).first()
+    if not contact:
+        raise ValueError("Contato da conversa não encontrado.")
+
+    if contact.opted_out:
+        raise ValueError("Contato possui opt-out ativo. Não é possível enviar mensagem.")
+
+    normalized_caption = (caption or "").strip() or None
+    normalized_pending_id = _normalize_client_pending_id(client_pending_id)
+    temp_external_id = normalized_pending_id or f"pending:{uuid.uuid4()}"
+
+    msg = WhatsAppMessage(
+        organization_id=conversation.organization_id,
+        conversation_id=conversation.id,
+        contact_id=contact.id,
+        external_message_id=temp_external_id,
+        direction=MessageDirection.OUTBOUND,
+        message_type=provider_media_type,
+        status=MessageStatus.PENDING,
+        body_text=normalized_caption,
+        media_type=media_mime_type,
+        media_filename=media_filename,
+        provider_metadata=_merge_provider_metadata(None, None, client_pending_id=temp_external_id),
+        sender_user_id=user_id,
+    )
+    db.add(msg)
+    db.flush()
+
+    try:
+        provider = get_whatsapp_provider(account)
+        result = provider.send_media(
+            contact.phone_e164,
+            media_payload,
+            provider_media_type,
+            caption=normalized_caption,
+            media_mime_type=media_mime_type,
+            media_filename=media_filename,
+        )
+
+        if result.status != "failed" and result.external_message_id:
+            existing = db.query(WhatsAppMessage).filter(
+                WhatsAppMessage.organization_id == conversation.organization_id,
+                WhatsAppMessage.external_message_id == result.external_message_id,
+                WhatsAppMessage.id != msg.id,
+            ).first()
+            if existing:
+                existing.sender_user_id = existing.sender_user_id or user_id
+                existing.status = MessageStatus.SENT
+                existing.sent_at = existing.sent_at or datetime.now(timezone.utc)
+                existing.body_text = existing.body_text or normalized_caption
+                existing.media_type = existing.media_type or media_mime_type
+                existing.media_filename = existing.media_filename or media_filename
+                existing.provider_metadata = _merge_provider_metadata(
+                    existing.provider_metadata,
+                    result.provider_metadata,
+                    client_pending_id=temp_external_id,
+                )
+                db.delete(msg)
+                msg = existing
+            else:
+                msg.external_message_id = result.external_message_id
+                msg.status = MessageStatus.SENT
+                msg.sent_at = datetime.now(timezone.utc)
+                msg.provider_metadata = _merge_provider_metadata(
+                    msg.provider_metadata,
+                    result.provider_metadata,
+                    client_pending_id=temp_external_id,
+                )
+        else:
+            msg.status = MessageStatus.FAILED
+            msg.error_message = result.error or "Falha desconhecida no provider."
+            msg.failed_at = datetime.now(timezone.utc)
+            msg.provider_metadata = _merge_provider_metadata(
+                msg.provider_metadata,
+                None,
+                client_pending_id=temp_external_id,
+            )
+    except Exception as e:
+        logger.exception("Falha ao enviar mídia via provider")
+        msg.status = MessageStatus.FAILED
+        msg.error_message = str(e)[:512]
+        msg.failed_at = datetime.now(timezone.utc)
+        msg.provider_metadata = _merge_provider_metadata(
+            msg.provider_metadata,
+            None,
+            client_pending_id=temp_external_id,
+        )
+
+    now = datetime.now(timezone.utc)
+    conversation.last_message_at = now
+    if normalized_caption:
+        conversation.last_message_preview = normalized_caption[:256]
+    elif media_filename:
+        conversation.last_message_preview = f"[Arquivo] {media_filename}"[:256]
+    else:
+        conversation.last_message_preview = f"[{provider_media_type}]"[:256]
     if not conversation.first_response_at:
         conversation.first_response_at = now
 
@@ -621,6 +1587,7 @@ def send_template_message(
     template: WhatsAppTemplate,
     variables: Optional[dict] = None,
     user_id: Optional[str] = None,
+    client_pending_id: Optional[str] = None,
 ) -> WhatsAppMessage:
     """Envia mensagem de template aprovado via provider."""
     from src.providers.whatsapp.factory import get_whatsapp_provider
@@ -639,7 +1606,8 @@ def send_template_message(
     if contact.opted_out:
         raise ValueError("Contato possui opt-out ativo.")
 
-    temp_external_id = f"pending:{uuid.uuid4()}"
+    normalized_pending_id = _normalize_client_pending_id(client_pending_id)
+    temp_external_id = normalized_pending_id or f"pending:{uuid.uuid4()}"
     msg = WhatsAppMessage(
         organization_id=conversation.organization_id,
         conversation_id=conversation.id,
@@ -650,6 +1618,7 @@ def send_template_message(
         status=MessageStatus.PENDING,
         template_id=template.id,
         template_variables=variables,
+        provider_metadata=_merge_provider_metadata(None, None, client_pending_id=temp_external_id),
         sender_user_id=user_id,
     )
     db.add(msg)
@@ -664,19 +1633,50 @@ def send_template_message(
             variables or {},
         )
         if result.status != "failed" and result.external_message_id:
-            msg.external_message_id = result.external_message_id
-            msg.status = MessageStatus.SENT
-            msg.sent_at = datetime.now(timezone.utc)
-            msg.provider_metadata = result.provider_metadata
+            existing = db.query(WhatsAppMessage).filter(
+                WhatsAppMessage.organization_id == conversation.organization_id,
+                WhatsAppMessage.external_message_id == result.external_message_id,
+                WhatsAppMessage.id != msg.id,
+            ).first()
+            if existing:
+                existing.sender_user_id = existing.sender_user_id or user_id
+                existing.status = MessageStatus.SENT
+                existing.sent_at = existing.sent_at or datetime.now(timezone.utc)
+                existing.provider_metadata = _merge_provider_metadata(
+                    existing.provider_metadata,
+                    result.provider_metadata,
+                    client_pending_id=temp_external_id,
+                )
+                db.delete(msg)
+                msg = existing
+            else:
+                msg.external_message_id = result.external_message_id
+                msg.status = MessageStatus.SENT
+                msg.sent_at = datetime.now(timezone.utc)
+                msg.provider_metadata = _merge_provider_metadata(
+                    msg.provider_metadata,
+                    result.provider_metadata,
+                    client_pending_id=temp_external_id,
+                )
         else:
             msg.status = MessageStatus.FAILED
             msg.error_message = result.error or "Falha desconhecida no provider."
             msg.failed_at = datetime.now(timezone.utc)
+            msg.provider_metadata = _merge_provider_metadata(
+                msg.provider_metadata,
+                None,
+                client_pending_id=temp_external_id,
+            )
     except Exception as e:
         logger.exception("Falha ao enviar template via provider")
         msg.status = MessageStatus.FAILED
         msg.error_message = str(e)[:512]
         msg.failed_at = datetime.now(timezone.utc)
+        msg.provider_metadata = _merge_provider_metadata(
+            msg.provider_metadata,
+            None,
+            client_pending_id=temp_external_id,
+        )
 
     now = datetime.now(timezone.utc)
     conversation.last_message_at = now
@@ -730,15 +1730,73 @@ def get_messages(
     conversation_id: str,
     offset: int = 0,
     limit: int = 50,
+    from_latest: bool = False,
 ) -> tuple[list[WhatsAppMessage], int]:
     """Histórico de mensagens de uma conversa."""
     q = db.query(WhatsAppMessage).filter(
         WhatsAppMessage.organization_id == organization_id,
         WhatsAppMessage.conversation_id == conversation_id,
-    ).order_by(WhatsAppMessage.created_at)
+    ).order_by(WhatsAppMessage.created_at, WhatsAppMessage.id)
     total = q.count()
-    items = q.offset(offset).limit(limit).all()
+    if not from_latest:
+        items = q.offset(offset).limit(limit).all()
+        return items, total
+
+    normalized_offset = max(offset, 0)
+    normalized_limit = max(limit, 1)
+    end = max(total - normalized_offset, 0)
+    start = max(end - normalized_limit, 0)
+    page_size = max(end - start, 0)
+    items = q.offset(start).limit(page_size).all() if page_size > 0 else []
     return items, total
+
+
+def reconcile_conversation_message_timestamps(
+    db: Session,
+    conversation: WhatsAppConversation,
+) -> int:
+    """
+    Corrige created_at de mensagens que foram persistidas com horário do servidor
+    em vez do horário real do provider (messageTimestamp).
+    """
+    rows = db.query(WhatsAppMessage).filter(
+        WhatsAppMessage.organization_id == conversation.organization_id,
+        WhatsAppMessage.conversation_id == conversation.id,
+    ).all()
+
+    changed = 0
+    for msg in rows:
+        provider_dt = _provider_metadata_datetime(msg.provider_metadata)
+        if not provider_dt:
+            continue
+        current_created = _to_aware_utc(msg.created_at)
+        if not current_created:
+            msg.created_at = provider_dt
+            changed += 1
+            continue
+        # Ajusta só quando há desvio relevante para evitar regravações desnecessárias.
+        if abs((current_created - provider_dt).total_seconds()) <= 120:
+            continue
+        msg.created_at = provider_dt
+        if msg.sent_at:
+            msg.sent_at = provider_dt
+        if msg.read_at:
+            msg.read_at = provider_dt
+        changed += 1
+
+    if changed > 0:
+        latest = db.query(WhatsAppMessage).filter(
+            WhatsAppMessage.organization_id == conversation.organization_id,
+            WhatsAppMessage.conversation_id == conversation.id,
+        ).order_by(desc(WhatsAppMessage.created_at), desc(WhatsAppMessage.id)).first()
+        if latest:
+            conversation.last_message_at = _to_aware_utc(latest.created_at) or conversation.last_message_at
+            conversation.last_message_preview = (
+                (latest.body_text or "")[:256]
+                if latest.body_text
+                else f"[{latest.message_type}]"
+            )
+    return changed
 
 
 # ---------------------------------------------------------------------------

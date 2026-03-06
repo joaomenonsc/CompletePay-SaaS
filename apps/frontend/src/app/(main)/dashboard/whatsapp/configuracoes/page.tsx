@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import type { AxiosError } from "axios";
 import { Loader2, Plus, QrCode, RefreshCw, Settings, Star, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -117,6 +118,7 @@ function QRCodeDialog({ accountId }: { accountId: string }) {
 
 export default function WhatsAppConfiguracoesPage() {
   const [createOpen, setCreateOpen] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [form, setForm] = useState<WAAccountCreate>({
     display_name: "",
     phone_number: "",
@@ -131,24 +133,34 @@ export default function WhatsAppConfiguracoesPage() {
 
   const accounts = data?.items ?? [];
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
+    setCreateError(null);
     if (!form.display_name || !form.phone_number) {
-      toast.error("Nome e telefone são obrigatórios.");
+      const msg = "Nome e telefone são obrigatórios.";
+      setCreateError(msg);
+      toast.error(msg);
       return;
     }
-    createAccount.mutate(form, {
-      onSuccess: () => {
-        toast.success("Conta criada com sucesso!");
-        setCreateOpen(false);
-        setForm({
-          display_name: "",
-          phone_number: "",
-          provider: "evolution",
-          is_default: false,
-        });
-      },
-      onError: (e) => toast.error(`Erro: ${(e as Error).message}`),
-    });
+    try {
+      await createAccount.mutateAsync(form);
+      toast.success("Conta criada com sucesso!");
+      setCreateOpen(false);
+      setForm({
+        display_name: "",
+        phone_number: "",
+        provider: "evolution",
+        is_default: false,
+      });
+      setCreateError(null);
+    } catch (e) {
+      const err = e as AxiosError<{ detail?: string | string[] }>;
+      const detail = err.response?.data?.detail;
+      const detailMsg = Array.isArray(detail) ? detail.join(", ") : detail;
+      const msg = detailMsg || err.message || "Erro ao criar conta.";
+      setCreateError(msg);
+      toast.error(`Erro: ${msg}`);
+      console.error("Falha ao criar conta WhatsApp", err);
+    }
   };
 
   return (
@@ -159,7 +171,13 @@ export default function WhatsAppConfiguracoesPage() {
           <h1 className="text-2xl font-semibold">Configurações WhatsApp</h1>
           <p className="text-sm text-muted-foreground">Gerencie contas e configurações do módulo WhatsApp.</p>
         </div>
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <Dialog
+          open={createOpen}
+          onOpenChange={(open) => {
+            setCreateOpen(open);
+            if (!open) setCreateError(null);
+          }}
+        >
           <DialogTrigger asChild>
             <Button>
               <Plus className="mr-2 size-4" />
@@ -200,6 +218,7 @@ export default function WhatsAppConfiguracoesPage() {
                   }
                 />
               </div>
+              {createError && <p className="text-destructive text-sm">{createError}</p>}
               <div className="flex items-center gap-2">
                 <Switch
                   id="is_default"
@@ -212,7 +231,7 @@ export default function WhatsAppConfiguracoesPage() {
               </div>
             </div>
             <DialogFooter>
-              <Button onClick={handleCreate} disabled={createAccount.isPending}>
+              <Button type="button" onClick={handleCreate} disabled={createAccount.isPending}>
                 {createAccount.isPending ? (
                   <Loader2 className="mr-2 size-4 animate-spin" />
                 ) : (

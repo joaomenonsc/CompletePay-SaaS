@@ -22,6 +22,8 @@ import type {
     WAMessageListResponse,
     WAMetrics,
     WAPreviewRecipients,
+    WAEditTextInput,
+    WASendMediaInput,
     WAQRCode,
     WASendTemplateInput,
     WASendTextInput,
@@ -126,7 +128,7 @@ export async function updateConversation(
 
 export async function fetchMessages(
     conversationId: string,
-    params?: { limit?: number; offset?: number }
+    params?: { limit?: number; offset?: number; from_latest?: boolean }
 ): Promise<WAMessageListResponse> {
     const { data } = await apiClient.get(
         `${BASE}/conversations/${conversationId}/messages`,
@@ -146,6 +148,22 @@ export async function sendTextMessage(
     return data;
 }
 
+export async function editMessageText(
+    messageId: string,
+    body: WAEditTextInput
+): Promise<WAMessage> {
+    const { data } = await apiClient.patch(
+        `${BASE}/messages/${messageId}/text`,
+        body
+    );
+    return data;
+}
+
+export async function deleteMessage(messageId: string): Promise<WAMessage> {
+    const { data } = await apiClient.post(`${BASE}/messages/${messageId}/delete`);
+    return data;
+}
+
 export async function sendTemplateMessage(
     conversationId: string,
     body: WASendTemplateInput
@@ -153,6 +171,25 @@ export async function sendTemplateMessage(
     const { data } = await apiClient.post(
         `${BASE}/conversations/${conversationId}/messages/template`,
         body
+    );
+    return data;
+}
+
+export async function sendMediaMessage(
+    conversationId: string,
+    body: WASendMediaInput
+): Promise<WAMessage> {
+    const formData = new FormData();
+    formData.append("file", body.file);
+    if (body.caption?.trim()) {
+        formData.append("caption", body.caption.trim());
+    }
+    if (body.client_pending_id?.trim()) {
+        formData.append("client_pending_id", body.client_pending_id.trim());
+    }
+    const { data } = await apiClient.post(
+        `${BASE}/conversations/${conversationId}/messages/media`,
+        formData
     );
     return data;
 }

@@ -6,6 +6,7 @@ Endpoint registrado em PUBLIC_ROUTES em auth.py (prefixo sem {account_id}).
 import hashlib
 import hmac
 import logging
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
@@ -20,6 +21,18 @@ webhook_router = APIRouter(
     prefix="/api/v1/public",
     tags=["whatsapp-webhook"],
 )
+
+
+def _parse_received_at(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -88,24 +101,85 @@ async def process_webhook_event(
         payloads = prov.parse_webhook(account_id, raw_payload)
 
         status_updates: list[dict[str, Any]] = []
+        media_message_types = {"audio", "image", "video", "document", "sticker"}
         for payload in payloads:
             if payload.event_type == "message.received":
                 for inbound in payload.inbound_messages:
-                    whatsapp_service.record_inbound_message(
-                        db=db,
-                        organization_id=organization_id,
-                        account=account,
-                        external_message_id=inbound.external_message_id,
-                        phone=inbound.phone_normalized,
-                        message_type=inbound.message_type,
-                        body_text=inbound.body_text,
-                        media_url=inbound.media_url,
-                        media_type=inbound.media_type,
-                        media_filename=inbound.media_filename,
-                        display_name=inbound.display_name,
-                        provider_metadata=inbound.provider_metadata,
-                    )
+                    event_at = _parse_received_at(inbound.received_at)
+                    if (inbound.direction or "").lower() == "outbound":
+                        msg = whatsapp_service.record_provider_outbound_message(
+                            db=db,
+                            organization_id=organization_id,
+                            account=account,
+                            external_message_id=inbound.external_message_id,
+                            phone=inbound.phone_normalized,
+                            message_type=inbound.message_type,
+                            body_text=inbound.body_text,
+                            media_url=inbound.media_url,
+                            media_type=inbound.media_type,
+                            media_filename=inbound.media_filename,
+                            display_name=inbound.display_name,
+                            profile_picture_url=inbound.profile_picture_url,
+                            provider_metadata=inbound.provider_metadata,
+                            event_at=event_at,
+                        )
+                    else:
+                        msg = whatsapp_service.record_inbound_message(
+                            db=db,
+                            organization_id=organization_id,
+                            account=account,
+                            external_message_id=inbound.external_message_id,
+                            phone=inbound.phone_normalized,
+                            message_type=inbound.message_type,
+                            body_text=inbound.body_text,
+                            media_url=inbound.media_url,
+                            media_type=inbound.media_type,
+                            media_filename=inbound.media_filename,
+                            display_name=inbound.display_name,
+                            profile_picture_url=inbound.profile_picture_url,
+                            provider_metadata=inbound.provider_metadata,
+                            event_at=event_at,
+                        )
                     db.commit()
+                    if msg:
+                        whatsapp_service.enrich_message_sender_context(msg)
+                        media_url = msg.media_url
+                        if (
+                            isinstance(msg.provider_metadata, dict)
+                            and (
+                                msg.media_url
+                                or msg.media_type
+                                or str(msg.message_type or "").lower() in media_message_types
+                            )
+                        ):
+                            media_url = f"/api/v1/whatsapp/messages/{msg.id}/media"
+                        await ws_manager.broadcast(str(account_id), {
+                            "type": "message.new",
+                            "account_id": str(account_id),
+                            "conversation_id": str(msg.conversation_id),
+                            "conversation": whatsapp_service.serialize_conversation_snapshot(
+                                db,
+                                organization_id,
+                                str(msg.conversation_id),
+                            ),
+                            "message": {
+                                "id": str(msg.id),
+                                "conversation_id": str(msg.conversation_id),
+                                "external_message_id": msg.external_message_id,
+                                "client_pending_id": msg.client_pending_id,
+                                "direction": str(msg.direction),
+                                "message_type": msg.message_type,
+                                "body_text": msg.body_text,
+                                "media_url": media_url,
+                                "media_type": msg.media_type,
+                                "media_filename": msg.media_filename,
+                                "status": msg.status,
+                                "created_at": msg.created_at.isoformat() if msg.created_at else None,
+                                "is_group_message": bool(getattr(msg, "is_group_message", False)),
+                                "sender_name": getattr(msg, "sender_name", None),
+                                "sender_phone": getattr(msg, "sender_phone", None),
+                            },
+                        })
 
             elif payload.event_type in ("message.delivered", "message.read", "message.failed"):
                 for su in payload.status_updates:

@@ -110,6 +110,17 @@ class WhatsAppContactResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class WhatsAppInboxContactResponse(BaseModel):
+    id: str
+    phone_normalized: str
+    phone_e164: str
+    phone_display: Optional[str] = None
+    display_name: Optional[str] = None
+    profile_picture_url: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 # ---------------------------------------------------------------------------
 # WhatsAppConversation
 # ---------------------------------------------------------------------------
@@ -144,6 +155,7 @@ class WhatsAppConversationResponse(BaseModel):
     is_deleted: bool
     created_at: datetime
     updated_at: datetime
+    contact: Optional[WhatsAppContactResponse] = None
     # Dados desnormalizados do contact (join opcional)
     contact_name: Optional[str] = None
     contact_phone: Optional[str] = None
@@ -151,8 +163,29 @@ class WhatsAppConversationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class WhatsAppInboxConversationResponse(BaseModel):
+    id: str
+    account_id: str
+    contact_id: str
+    status: str
+    unread_count: int
+    last_message_at: Optional[datetime] = None
+    last_message_preview: Optional[str] = None
+    created_at: datetime
+    contact: Optional[WhatsAppInboxContactResponse] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class WhatsAppConversationListResponse(BaseModel):
     items: list[WhatsAppConversationResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class WhatsAppInboxConversationListResponse(BaseModel):
+    items: list[WhatsAppInboxConversationResponse]
     total: int
     limit: int
     offset: int
@@ -165,12 +198,19 @@ class WhatsAppConversationListResponse(BaseModel):
 class MessageSendTextSchema(BaseModel):
     """POST /conversations/{id}/messages/text"""
     body_text: str = Field(..., min_length=1, max_length=4096)
+    client_pending_id: Optional[str] = Field(None, max_length=256)
+
+
+class MessageEditTextSchema(BaseModel):
+    """PATCH /messages/{id}/text"""
+    body_text: str = Field(..., min_length=1, max_length=4096)
 
 
 class MessageSendTemplateSchema(BaseModel):
     """POST /conversations/{id}/messages/template"""
     template_id: str = Field(..., min_length=1, max_length=36)
     variables: Optional[dict[str, Any]] = None
+    client_pending_id: Optional[str] = Field(None, max_length=256)
 
 
 class WhatsAppMessageResponse(BaseModel):
@@ -186,6 +226,7 @@ class WhatsAppMessageResponse(BaseModel):
     media_url: Optional[str] = None
     media_type: Optional[str] = None
     media_filename: Optional[str] = None
+    client_pending_id: Optional[str] = None
     template_id: Optional[str] = None
     template_variables: Optional[dict[str, Any]] = None
     sender_user_id: Optional[str] = None
@@ -195,6 +236,9 @@ class WhatsAppMessageResponse(BaseModel):
     read_at: Optional[datetime] = None
     failed_at: Optional[datetime] = None
     created_at: datetime
+    is_group_message: bool = False
+    sender_name: Optional[str] = None
+    sender_phone: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

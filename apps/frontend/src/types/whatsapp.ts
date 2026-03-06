@@ -92,12 +92,14 @@ export interface WAContact {
     phone_e164: string;
     phone_display?: string;
     display_name?: string;
+    profile_picture_url?: string;
     opted_out: boolean;
     opted_out_at?: string;
     patient_id?: string;
     tags?: string[];
     is_deleted: boolean;
     created_at: string;
+    updated_at?: string;
 }
 
 // ── Conversation ──────────────────────────────────────────────────────────────
@@ -143,6 +145,7 @@ export interface WAMessage {
     conversation_id: string;
     contact_id: string;
     external_message_id: string;
+    client_pending_id?: string;
     direction: WAMessageDirection;
     message_type: string;
     status: WAMessageStatus;
@@ -159,6 +162,9 @@ export interface WAMessage {
     read_at?: string;
     failed_at?: string;
     created_at: string;
+    is_group_message?: boolean;
+    sender_name?: string;
+    sender_phone?: string;
 }
 
 export interface WAMessageListResponse {
@@ -170,11 +176,23 @@ export interface WAMessageListResponse {
 
 export interface WASendTextInput {
     body_text: string;
+    client_pending_id?: string;
+}
+
+export interface WAEditTextInput {
+    body_text: string;
 }
 
 export interface WASendTemplateInput {
     template_id: string;
     variables?: Record<string, string>;
+    client_pending_id?: string;
+}
+
+export interface WASendMediaInput {
+    file: File;
+    caption?: string;
+    client_pending_id?: string;
 }
 
 // ── Template ──────────────────────────────────────────────────────────────────
