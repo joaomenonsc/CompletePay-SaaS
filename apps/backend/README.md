@@ -117,6 +117,12 @@ A aplicacao sobe na porta 8000, com politicas de restart e limites de recursos. 
 ### Limitações
 
 - **WebSockets**: a Vercel executa uma função por requisição HTTP. O endpoint de **chat por WebSocket** (`/ws/chat`) pode não funcionar como conexão longa; para chat em tempo real em produção, avalie um serviço dedicado (ex.: Ably, Pusher) ou hospedar o backend em Railway/Render/Fly.io onde o processo fica ativo.
+
+## Railway
+
+- Configure o service com **Root Directory** = `apps/backend`.
+- Use o builder padrão da Railway/Nixpacks; o arquivo [`nixpacks.toml`](/Users/joaomenon/Documents/CompletePay/SaaS/apps/backend/nixpacks.toml) instala as dependências Python e sobe o `uvicorn`.
+- Se preferir Docker na Railway, use [`docker/Dockerfile`](/Users/joaomenon/Documents/CompletePay/SaaS/apps/backend/docker/Dockerfile) com contexto em `apps/backend`.
 - **Tamanho do bundle**: o deploy tem limite de 250 MB; evite incluir arquivos desnecessários (a Vercel ignora automaticamente pastas como `__pycache__` e `.venv` quando aplicável).
 
 ### Se aparecer "This Serverless Function has crashed" (500)
