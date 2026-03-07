@@ -40,7 +40,9 @@ PUBLIC_ROUTES = [
     ("POST", "/api/v1/email-marketing/webhooks/resend"),
     ("POST", "/api/v1/email-marketing/webhooks/inbound"),
     ("POST", "/api/v1/public/whatsapp/webhook/"),  # legado — manter por compatibilidade
+    ("GET", "/api/v1/public/whatsapp/webhook/"),  # verificacao/healthcheck do provider
     ("POST", "/api/v1/whatsapp/webhook/"),  # webhook WhatsApp (autenticação por HMAC/account_id)
+    ("GET", "/api/v1/whatsapp/webhook/"),  # verificacao/healthcheck do provider
 ]
 
 

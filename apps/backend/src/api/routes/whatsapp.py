@@ -517,6 +517,23 @@ def _configure_evolution_instance(
         )
 
 
+def _build_public_webhook_url(request: Request, account_id: str) -> str:
+    """
+    Retorna a URL pública preferencial do webhook.
+    Em produção, usa BACKEND_PUBLIC_URL quando configurado para evitar scheme/host incorretos
+    vindos do proxy. Sem a env, usa a rota pública registrada no app.
+    """
+    settings = get_settings()
+    backend_public_url = (settings.backend_public_url or "").strip().rstrip("/")
+    if backend_public_url:
+        return f"{backend_public_url}/api/v1/public/whatsapp/webhook/{account_id}"
+
+    webhook_url = str(request.url_for("receive_whatsapp_webhook", account_id=account_id))
+    if settings.app_env == "production" and webhook_url.startswith("http://"):
+        webhook_url = "https://" + webhook_url.removeprefix("http://")
+    return webhook_url
+
+
 # ===========================================================================
 # Contas WhatsApp
 # ===========================================================================
@@ -606,7 +623,7 @@ def create_account(
             and account.instance_name
             and account.api_base_url
         ):
-            webhook_url = str(request.url_for("receive_webhook", account_id=str(account.id)))
+            webhook_url = _build_public_webhook_url(request, str(account.id))
             _configure_evolution_instance(
                 account=account,
                 api_key=effective_api_key,
@@ -679,7 +696,7 @@ def update_account(
                 or settings.whatsapp_evolution_api_key
                 or ""
             )
-            webhook_url = str(request.url_for("receive_webhook", account_id=str(account.id)))
+            webhook_url = _build_public_webhook_url(request, str(account.id))
             _configure_evolution_instance(
                 account=account,
                 api_key=api_key,
@@ -808,7 +825,7 @@ def rotate_webhook_secret(
     if account.provider == "evolution" and account.instance_name and account.api_base_url and account.api_key_encrypted:
         from src.providers.whatsapp.encryption import decrypt_api_key
         api_key = decrypt_api_key(account.api_key_encrypted)
-        webhook_url = str(request.url_for("receive_webhook", account_id=str(account.id)))
+        webhook_url = _build_public_webhook_url(request, str(account.id))
         _configure_evolution_instance(
             account=account,
             api_key=api_key,
@@ -893,7 +910,6 @@ async def receive_webhook(
             "status": new_status,
         })
         logger.info("connection.update: account=%s state=%s -> %s", account_id, state, new_status)
-        return {"status": "ok"}
 
     # ── messages.upsert — mensagem recebida ────────────────────────────────
     message_events = {
@@ -1010,6 +1026,14 @@ async def receive_webhook(
 
     # Eventos desconhecidos — ignorar silenciosamente
     return {"status": "ignored", "event": event}
+
+
+@router.get("/webhook/{account_id}", include_in_schema=False)
+async def verify_webhook(account_id: str):
+    """
+    Compatibilidade: alguns providers fazem GET de verificação antes do POST real.
+    """
+    return {"status": "ok", "account_id": account_id, "method": "GET"}
 
 
 # ===========================================================================

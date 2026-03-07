@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     frontend_url: str = Field(
         default="http://localhost:3003", validation_alias="FRONTEND_URL"
     )
+    backend_public_url: str = Field(
+        default="", validation_alias="BACKEND_PUBLIC_URL"
+    )
     # Email Marketing — ESP adapter settings
     resend_domain: str = Field(default="", validation_alias="RESEND_DOMAIN")
     marketing_batch_size: int = Field(

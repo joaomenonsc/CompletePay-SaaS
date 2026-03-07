@@ -308,3 +308,17 @@ async def receive_whatsapp_webhook(
     )
 
     return {"status": "ok"}
+
+
+@webhook_router.get(
+    "/whatsapp/webhook/{account_id}",
+    status_code=200,
+    summary="Verificação do webhook WhatsApp (público)",
+    response_model=dict,
+    include_in_schema=False,
+)
+async def verify_whatsapp_webhook(account_id: str):
+    """
+    Alguns providers fazem GET de verificação/healthcheck na URL do webhook.
+    """
+    return {"status": "ok", "account_id": account_id, "method": "GET"}
